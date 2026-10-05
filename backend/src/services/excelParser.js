@@ -22,16 +22,16 @@ export const FIELD_DEFS = {
  * ให้ admin ตรวจกับไฟล์จริงแล้วแก้ในหน้า "รูปแบบไฟล์" ได้โดยไม่ต้องแก้โค้ด
  */
 export const DEFAULT_OPD_MAPPING = {
-  rep_no:       ['REP No.', 'REP NO', 'REP', 'เลข REP'],
+  rep_no:       ['REP', 'REP No.', 'REP NO', 'เลข REP'],
   tran_id:      ['TRAN_ID', 'TRAN ID', 'TRANID'],
   hn:           ['HN'],
   an:           ['AN'],
   pid:          ['PID', 'CID', 'เลขประจำตัวประชาชน', 'เลขบัตรประชาชน'],
-  patient_name: ['ชื่อ-สกุล', 'ชื่อ - สกุล', 'ชื่อ', 'NAME'],
+  patient_name: ['ชื่อ - สกุล', 'ชื่อ– สกุล', 'ชื่อ-สกุล', 'ชื่อ', 'NAME'],
   service_date: ['วันเข้ารักษา', 'วันที่รับบริการ', 'วันรับบริการ', 'DATEADM', 'วันที่'],
   fund:         ['สิทธิ', 'กองทุน', 'MAININSCL', 'สิทธิหลัก'],
   claim_amount: ['เรียกเก็บ', 'ยอดเรียกเก็บ', 'ค่ารักษาที่เรียกเก็บ', 'CHARGE'],
-  compensated:  ['ชดเชยสุทธิ', 'ยอดชดเชย', 'ชดเชย', 'จ่ายชดเชย'],
+  compensated:  ['ยอดชดเชยทั้งสิ้น', 'ชดเชยสุทธิ', 'ยอดชดเชย', 'จ่ายชดเชย'],
   error_code:   ['ERROR CODE', 'Error Code', 'ERROR_CODE', 'รหัสข้อผิดพลาด', 'Deny'],
 };
 
@@ -63,17 +63,67 @@ function aliasesOf(mapping, field) {
   return (Array.isArray(v) ? v : v ? [v] : []);
 }
 
+const splitPath = (label) => String(label ?? '').split('/').map(norm).filter(Boolean);
+
+/** ส่วนท้ายของชื่อคอลัมน์ตรงกับชื่อที่กำหนดหรือไม่ เช่น "ยอดจ่าย / HC / HC" ลงท้ายด้วย "HC / HC" */
+function endsWithPath(colParts, nameParts) {
+  if (!nameParts.length || nameParts.length > colParts.length) return false;
+  const start = colParts.length - nameParts.length;
+  return nameParts.every((p, i) => colParts[start + i] === p);
+}
+
 /**
  * หาคอลัมน์ที่ตรงกับชื่อที่กำหนด
  * 1) ตรงกับชื่อเต็มของหัวตารางหลายชั้น เช่น "HC / DRUG"
- * 2) ถ้าไม่พบ เทียบกับชื่อชั้นล่างสุด เช่น "DRUG" (ใช้คอลัมน์แรกที่พบ)
+ * 2) ถ้าไม่พบ เทียบกับส่วนท้ายของชื่อ เช่น "HC / DRUG" ตรงกับ "ยอดจ่าย / HC / DRUG"
+ *    และ "INST" ตรงกับ "ยอดจ่าย / INST" (ใช้คอลัมน์แรกที่พบ)
+ * จึงไม่ต้องรู้ชื่อหัวกลุ่มชั้นบนสุด ซึ่งอาจต่างกันในแต่ละไฟล์
  */
 function findColumn(columns, name, used = new Set()) {
   const key = norm(name);
   if (!key) return null;
+  const nameParts = splitPath(name);
   return columns.find((c) => !used.has(c.index) && c.key === key)
-    || columns.find((c) => !used.has(c.index) && c.leafKey === key)
+    || columns.find((c) => !used.has(c.index) && endsWithPath(c.parts, nameParts))
     || null;
+}
+
+/** คอลัมน์ย่อยที่เป็น "ยอดที่จ่ายจริง" และ "ยอดที่คำนวณได้" ในกลุ่มเดียวกัน (ห้ามรวมกัน เพราะจะนับซ้ำ) */
+const PAID_LEAF = norm('ยอดชดเชยที่จ่ายจริง');
+const CALC_LEAF = norm('ยอดชดเชยที่คำนวณได้');
+
+/**
+ * หาคอลัมน์ยอดเงินของกองทุนจากชื่อที่กำหนด คืนได้หลายคอลัมน์ (ระบบจะรวมยอดให้)
+ *  - ชื่อตรงกับชื่อเต็มของคอลัมน์ -> ใช้คอลัมน์นั้นคอลัมน์เดียว
+ *  - ชื่อตรงกับหัวกลุ่มชั้นใดชั้นหนึ่ง เช่น "HC" (แถวที่ 13 ของไฟล์ REP)
+ *    -> ใช้ทุกคอลัมน์ย่อยใต้หัวกลุ่มนั้น เช่น HC + DRUG
+ *    -> ถ้ากลุ่มมีคอลัมน์ "ยอดชดเชยที่จ่ายจริง" ใช้เฉพาะคอลัมน์นั้น (เช่น DMIS) ไม่รวม "ที่คำนวณได้"
+ *  - ถ้าชื่อเดียวกันอยู่หลายกลุ่ม ใช้กลุ่มที่อยู่ชั้นบนกว่า แล้วกลุ่มที่อยู่ซ้ายสุด
+ */
+export function findFundColumns(columns, name) {
+  const key = norm(name);
+  if (!key) return [];
+  const exact = columns.find((c) => c.key === key);
+  if (exact) return [exact];
+
+  const nameParts = splitPath(name);
+  let best = null; // { depth, prefix }
+  for (const c of columns) {
+    for (let start = 0; start + nameParts.length <= c.parts.length; start += 1) {
+      const hit = nameParts.every((p, i) => c.parts[start + i] === p);
+      if (!hit) continue;
+      const depth = start + nameParts.length;
+      if (!best || depth < best.depth) best = { depth, prefix: c.parts.slice(0, depth) };
+      break;
+    }
+  }
+  if (!best) return [];
+
+  const group = columns.filter((c) => c.parts.length >= best.depth
+    && best.prefix.every((p, i) => c.parts[i] === p));
+  const paid = group.filter((c) => c.parts[c.parts.length - 1] === PAID_LEAF);
+  if (paid.length) return paid;
+  return group.filter((c) => c.parts[c.parts.length - 1] !== CALC_LEAF);
 }
 
 function buildColumnIndex(columns, mapping) {
@@ -94,7 +144,7 @@ function buildColumnIndex(columns, mapping) {
 
 const singleRowColumns = (row = []) => row.map((v, index) => {
   const label = text(v) ?? '';
-  return { index, label, key: norm(label), leafKey: norm(label) };
+  return { index, label, key: norm(label), parts: splitPath(label) };
 });
 
 /** หาแถวหัวตาราง: แถวที่จับคู่ฟิลด์ได้มากที่สุดใน 30 แถวแรก */
@@ -139,7 +189,7 @@ function buildHeaderColumns(rows, headerIdx, pidCol) {
       if (v !== null) parts.push(v);
     }
     const label = parts.join(' / ');
-    columns.push({ index: c, label, key: norm(label), leafKey: norm(parts[parts.length - 1]) });
+    columns.push({ index: c, label, key: norm(label), parts: parts.map(norm) });
   }
   return { columns, depth };
 }
@@ -219,8 +269,8 @@ export function parseExcel(buffer, profile, funds = []) {
     const matched = [];
     const missing = [];
     for (const name of f.stm_columns || []) {
-      const col = findColumn(columns, name);
-      if (col) matched.push(col); else missing.push(name);
+      const cols = findFundColumns(columns, name).filter((c) => !matched.includes(c));
+      if (cols.length) matched.push(...cols); else missing.push(name);
     }
     if (matched.length) fundCols[f.code] = matched.map((c) => c.index);
     fundColumns[f.code] = { matched: matched.map((c) => c.label), missing };

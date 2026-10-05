@@ -2,35 +2,49 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/client.js';
 import Diff from '../components/Diff.jsx';
+import MonthlyFundChart from '../components/MonthlyFundChart.jsx';
 import Pagination from '../components/Pagination.jsx';
 import PeriodFields from '../components/PeriodFields.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { showError } from '../utils/alert.js';
 import {
-  FUNDS, FUND_STATUS_META, FUND_STATUS_ORDER, int, lastMonthRange, money, rangeErrorOf, thaiDate,
+  ALL_FUND_STATUS_META, EXTRA_PAID_META, FUNDS, FUND_STATUS_META, FUND_STATUS_ORDER, int, lastMonthRange,
+  money, monthsBetween, percent, rangeErrorOf, thaiDate, thaiMonth,
 } from '../utils/format.js';
 import { pullHosxpOpd } from '../utils/hosxp.js';
 
 const PAGE_SIZE = 50;
+const ALL_STATUSES = [...FUND_STATUS_ORDER, 'EXTRA_PAID'];
 
 function FundStatus({ status }) {
-  const m = FUND_STATUS_META[status];
+  const m = ALL_FUND_STATUS_META[status];
   return <span className="status-badge" style={{ '--st-color': m.color }} title={m.hint}>{m.label}</span>;
 }
 
-/** รวมผลสรุปจาก backend เป็นแถวละกองทุน */
-function buildSummary(funds, summary) {
-  const empty = () => ({ total: 0, his: 0, stm: 0, ...Object.fromEntries(FUND_STATUS_ORDER.map((s) => [s, 0])) });
-  const byFund = Object.fromEntries(funds.map((f) => [f.code, { ...f, ...empty() }]));
-  const all = empty();
-  summary.forEach((r) => {
+/** รวมผลจาก backend เป็นแถวละกองทุน */
+function buildSummary(data) {
+  const empty = () => ({
+    patients: 0, visits: 0, his: 0, stm: 0, extraCount: 0, extraAmount: 0,
+    ...Object.fromEntries(FUND_STATUS_ORDER.map((s) => [s, 0])),
+  });
+  const byFund = Object.fromEntries(data.funds.map((f) => [f.code, { ...f, ...empty() }]));
+  const all = { ...empty(), patients: data.totals.patients, visits: data.totals.visits };
+
+  data.people.forEach((p) => {
+    if (byFund[p.fund_code]) Object.assign(byFund[p.fund_code], { patients: p.patients, visits: p.visits });
+  });
+  data.summary.forEach((r) => {
     const t = byFund[r.fund_code];
     if (!t) return;
     [t, all].forEach((x) => {
-      x[r.fund_status] += r.count;
-      x.total += r.count;
-      x.his += Number(r.his_amount);
-      x.stm += Number(r.stm_amount);
+      if (r.fund_status === 'EXTRA_PAID') {
+        x.extraCount += r.count;
+        x.extraAmount += Number(r.stm_amount);
+      } else {
+        x[r.fund_status] += r.count;
+        x.his += Number(r.his_amount);
+        x.stm += Number(r.stm_amount);
+      }
     });
   });
   return { rows: Object.values(byFund), all };
@@ -39,7 +53,7 @@ function buildSummary(funds, summary) {
 export default function FundReconPage() {
   const { isAdmin } = useAuth();
   const [range, setRange] = useState(lastMonthRange());
-  const [pttype, setPttype] = useState('UCS');
+  const [pttype, setPttype] = useState('');
   const [fundCode, setFundCode] = useState('');
   const [fundStatus, setFundStatus] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -47,6 +61,7 @@ export default function FundReconPage() {
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [showChart, setShowChart] = useState(true);
 
   const rangeError = rangeErrorOf(range);
   const params = useMemo(() => ({
@@ -73,9 +88,19 @@ export default function FundReconPage() {
   useEffect(() => { load(); }, [load]);
 
   const reset = (fn) => (...args) => { fn(...args); setPage(1); };
-  const selectCell = (code, status) => { setFundCode(code); setFundStatus(status); setPage(1); };
+  const select = (code, status) => { setFundCode(code); setFundStatus(status); setPage(1); };
 
-  const summary = useMemo(() => (data ? buildSummary(data.funds, data.summary) : null), [data]);
+  const summary = useMemo(() => (data ? buildSummary(data) : null), [data]);
+
+  // เติมเดือนที่ไม่มีข้อมูลให้ครบช่วง เพื่อให้ตารางและกราฟรายเดือนต่อเนื่อง
+  const monthly = useMemo(() => {
+    if (!data || rangeError) return [];
+    const map = Object.fromEntries(data.monthly.map((m) => [m.month, m]));
+    return monthsBetween(range.dateFrom, range.dateTo).map((month) => map[month] || {
+      month, patients: 0, visits: 0, his_amount: 0, stm_amount: 0,
+      not_sent: 0, not_sent_amount: 0, extra_paid: 0, extra_paid_amount: 0,
+    });
+  }, [data, range, rangeError]);
 
   const exportUrl = `/api/recon/funds/export?${new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== undefined),
@@ -85,21 +110,23 @@ export default function FundReconPage() {
     if (await pullHosxpOpd(range)) load();
   };
 
-  const countCell = (code, status, n) => (
+  const countCell = (code, status, n, meta) => (
     <td className="num" key={status}>
-      <button type="button" className="count-link" style={{ '--st-color': FUND_STATUS_META[status].color }}
-        disabled={!n} onClick={(e) => { e.stopPropagation(); selectCell(code, status); }}>
+      <button type="button" className="count-link" style={{ '--st-color': meta.color }}
+        disabled={!n} onClick={(e) => { e.stopPropagation(); select(code, status); }}>
         {int(n)}
       </button>
     </td>
   );
+
+  const fundName = fundCode ? `${fundCode} ${data?.funds.find((f) => f.code === fundCode)?.name || ''}` : 'ทุกกองทุน';
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>แยกกองทุน OPD</h1>
-          <p>คัด visit ที่มีรายการค่าบริการหรือยาตามที่ตั้งค่าไว้ในแต่ละกองทุน แล้วตรวจว่าส่งเบิกและได้รับเงินกองทุนนั้นแล้วหรือยัง</p>
+          <p>คนไข้ที่เข้าเกณฑ์เบิกตามรายการค่าบริการ/ยาและสิทธิที่ตั้งค่าไว้ จำนวนเงินที่ตั้งเบิก และจำนวนเงินที่เบิกได้จริงจาก Statement</p>
         </div>
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-outline-primary" onClick={pull} disabled={!!rangeError}>
@@ -115,7 +142,7 @@ export default function FundReconPage() {
         <div className="row g-3 align-items-end">
           <PeriodFields idPrefix="fr" value={range} onChange={reset(setRange)} />
           <div className="col-sm-6 col-lg-3">
-            <label className="form-label" htmlFor="fr-pt">สิทธิ (ตาม HOSxP)</label>
+            <label className="form-label" htmlFor="fr-pt">กรองเพิ่มตามกลุ่มสิทธิ</label>
             <select id="fr-pt" className="form-select" value={pttype} onChange={(e) => reset(setPttype)(e.target.value)}>
               {FUNDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
@@ -141,26 +168,35 @@ export default function FundReconPage() {
         </div>
       )}
 
+      {/* ---------- สรุปรายกองทุน ---------- */}
       <div className="panel">
         <div className="d-flex justify-content-between align-items-baseline mb-2">
           <div className="panel-title mb-0">สรุปรายกองทุน</div>
-          <span className="small muted">คลิกแถวเพื่อดูรายละเอียด หรือคลิกตัวเลขเพื่อกรองตามสถานะ</span>
+          <span className="small muted">คลิกแถวเพื่อดูรายเดือนและรายละเอียด หรือคลิกตัวเลขเพื่อกรองตามสถานะ</span>
         </div>
         <div className="table-wrap">
           <table className="table data-table fund-summary">
             <thead>
               <tr>
-                <th>กองทุน</th>
-                <th className="num">visit ที่เข้าเงื่อนไข</th>
+                <th rowSpan={2}>กองทุน</th>
+                <th colSpan={5} className="text-center">เข้าเกณฑ์เบิก</th>
+                <th colSpan={4} className="text-center">สถานะ (จำนวน visit)</th>
+                <th colSpan={2} className="text-center">ตรวจย้อนกลับ</th>
+              </tr>
+              <tr>
+                <th className="num">คนไข้</th>
+                <th className="num">visit</th>
+                <th className="num">ยอดตั้งเบิก</th>
+                <th className="num">ยอดเบิกได้</th>
+                <th className="num">เบิกได้ %</th>
                 {FUND_STATUS_ORDER.map((s) => <th key={s} className="num">{FUND_STATUS_META[s].label}</th>)}
-                <th className="num">ยอด HOSxP</th>
-                <th className="num">ยอดที่ได้รับ</th>
-                <th className="num">ผลต่าง</th>
+                <th className="num" title={EXTRA_PAID_META.hint}>{EXTRA_PAID_META.label}</th>
+                <th className="num">ยอดเงิน</th>
               </tr>
             </thead>
             <tbody>
               {summary?.rows.map((f) => (
-                <tr key={f.code} className={fundCode === f.code ? 'active' : ''} onClick={() => selectCell(fundCode === f.code ? '' : f.code, '')}>
+                <tr key={f.code} className={fundCode === f.code ? 'active' : ''} onClick={() => select(fundCode === f.code ? '' : f.code, '')}>
                   <td>
                     <strong>{f.code}</strong> <span className="muted">{f.name}</span>
                     {f.item_count === 0 && (
@@ -169,11 +205,14 @@ export default function FundReconPage() {
                       </div>
                     )}
                   </td>
-                  <td className="num">{int(f.total)}</td>
-                  {FUND_STATUS_ORDER.map((s) => countCell(f.code, s, f[s]))}
+                  <td className="num">{int(f.patients)}</td>
+                  <td className="num">{int(f.visits)}</td>
                   <td className="num">{money(f.his)}</td>
                   <td className="num">{money(f.stm)}</td>
-                  <td className="num"><Diff value={f.total ? f.stm - f.his : null} /></td>
+                  <td className="num">{percent(f.stm, f.his)}</td>
+                  {FUND_STATUS_ORDER.map((s) => countCell(f.code, s, f[s], FUND_STATUS_META[s]))}
+                  {countCell(f.code, 'EXTRA_PAID', f.extraCount, EXTRA_PAID_META)}
+                  <td className="num">{f.extraCount ? money(f.extraAmount) : <span className="muted">–</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -181,35 +220,81 @@ export default function FundReconPage() {
               <tfoot>
                 <tr>
                   <td>รวมทุกกองทุน</td>
-                  <td className="num">{int(summary.all.total)}</td>
-                  {FUND_STATUS_ORDER.map((s) => <td key={s} className="num">{int(summary.all[s])}</td>)}
+                  <td className="num" title="นับคนไข้ไม่ซ้ำ แม้อยู่หลายกองทุน">{int(summary.all.patients)}</td>
+                  <td className="num" title="นับ visit ไม่ซ้ำ แม้อยู่หลายกองทุน">{int(summary.all.visits)}</td>
                   <td className="num">{money(summary.all.his)}</td>
                   <td className="num">{money(summary.all.stm)}</td>
-                  <td className="num"><Diff value={summary.all.total ? summary.all.stm - summary.all.his : null} /></td>
+                  <td className="num">{percent(summary.all.stm, summary.all.his)}</td>
+                  {FUND_STATUS_ORDER.map((s) => <td key={s} className="num">{int(summary.all[s])}</td>)}
+                  <td className="num">{int(summary.all.extraCount)}</td>
+                  <td className="num">{money(summary.all.extraAmount)}</td>
                 </tr>
               </tfoot>
             )}
           </table>
         </div>
         <p className="small muted mb-0 mt-2">
-          ยอด HOSxP คือราคารวมของรายการที่เข้าเงื่อนไขกองทุนนั้น ส่วนยอดที่ได้รับมาจากคอลัมน์ของกองทุนในไฟล์ REP
-          สองยอดนี้คำนวณคนละหลักเกณฑ์ ผลต่างจึงใช้ดูภาพรวมการได้รับเงิน ไม่ได้หมายความว่าเบิกผิด
+          คนไข้นับไม่ซ้ำด้วยเลขบัตรประชาชน แถวรวมนับคนไข้และ visit ไม่ซ้ำแม้อยู่หลายกองทุน ส่วนจำนวนตามสถานะนับเป็นรายการกองทุนต่อ visit
+          ยอดตั้งเบิกคือราคารวมของรายการที่เข้าเกณฑ์ใน HOSxP ยอดเบิกได้มาจากคอลัมน์ของกองทุนในไฟล์ REP
         </p>
       </div>
 
+      {/* ---------- สรุปรายเดือน ---------- */}
+      <div className="panel">
+        <div className="d-flex justify-content-between align-items-baseline mb-3">
+          <div className="panel-title mb-0">สรุปรายเดือน: {fundName}</div>
+          <button type="button" className="btn btn-sm btn-link" onClick={() => setShowChart((v) => !v)}>
+            {showChart ? 'ซ่อนกราฟ' : 'แสดงกราฟ'}
+          </button>
+        </div>
+        {showChart && monthly.length > 0 && <div className="mb-3"><MonthlyFundChart months={monthly} /></div>}
+        <div className="table-wrap">
+          <table className="table table-sm data-table">
+            <thead>
+              <tr>
+                <th>เดือน</th>
+                <th className="num">คนไข้</th>
+                <th className="num">visit</th>
+                <th className="num">ยอดตั้งเบิก</th>
+                <th className="num">ยอดเบิกได้</th>
+                <th className="num">เบิกได้ %</th>
+                <th className="num">ไม่พบใน Statement</th>
+                <th className="num">ยอดที่ยังไม่ได้เบิก</th>
+                <th className="num">ได้รับแต่ไม่เข้าเกณฑ์</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthly.map((m) => (
+                <tr key={m.month}>
+                  <td>{thaiMonth(m.month)}</td>
+                  <td className="num">{int(m.patients)}</td>
+                  <td className="num">{int(m.visits)}</td>
+                  <td className="num">{money(m.his_amount)}</td>
+                  <td className="num">{money(m.stm_amount)}</td>
+                  <td className="num">{percent(Number(m.stm_amount), Number(m.his_amount))}</td>
+                  <td className="num">{int(m.not_sent)}</td>
+                  <td className="num">{m.not_sent ? money(m.not_sent_amount) : <span className="muted">–</span>}</td>
+                  <td className="num">{m.extra_paid ? `${int(m.extra_paid)} (${money(m.extra_paid_amount)})` : <span className="muted">–</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="small muted mb-0 mt-1">คนไข้รายเดือนนับไม่ซ้ำภายในเดือน ผลรวมทุกเดือนจึงอาจมากกว่าจำนวนคนไข้ทั้งช่วง</p>
+      </div>
+
+      {/* ---------- รายละเอียด ---------- */}
       <div className="panel">
         <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
-          <span className="fw-medium me-1">
-            {fundCode ? `กองทุน ${fundCode}` : 'ทุกกองทุน'}
-          </span>
-          <button type="button" className={`chip ${!fundStatus ? 'active' : ''}`} onClick={() => selectCell(fundCode, '')}>ทุกสถานะ</button>
-          {FUND_STATUS_ORDER.map((s) => (
-            <button key={s} type="button" className={`chip ${fundStatus === s ? 'active' : ''}`} onClick={() => selectCell(fundCode, s)}>
-              {FUND_STATUS_META[s].label}
+          <span className="fw-medium me-1">รายละเอียด: {fundName}</span>
+          <button type="button" className={`chip ${!fundStatus ? 'active' : ''}`} onClick={() => select(fundCode, '')}>ทุกสถานะ</button>
+          {ALL_STATUSES.map((s) => (
+            <button key={s} type="button" className={`chip ${fundStatus === s ? 'active' : ''}`} onClick={() => select(fundCode, s)}>
+              {ALL_FUND_STATUS_META[s].label}
             </button>
           ))}
           {fundCode && (
-            <button type="button" className="btn btn-sm btn-link" onClick={() => selectCell('', fundStatus)}>แสดงทุกกองทุน</button>
+            <button type="button" className="btn btn-sm btn-link" onClick={() => select('', fundStatus)}>แสดงทุกกองทุน</button>
           )}
           {loading && <span className="spinner-border spinner-border-sm text-secondary ms-auto" role="status" />}
         </div>
@@ -223,9 +308,10 @@ export default function FundReconPage() {
                 <th>วันที่รับบริการ</th>
                 <th>HN / VN</th>
                 <th>ผู้ป่วย</th>
-                <th>รายการที่เข้าเงื่อนไข</th>
-                <th className="num">ยอด HOSxP</th>
-                <th className="num">ยอดที่ได้รับ</th>
+                <th>สิทธิ</th>
+                <th>รายการที่เข้าเกณฑ์ / เหตุผล</th>
+                <th className="num">ยอดตั้งเบิก</th>
+                <th className="num">ยอดเบิกได้</th>
                 <th className="num">ผลต่าง</th>
                 <th>REP / TRAN_ID</th>
                 <th>รหัสข้อผิดพลาด</th>
@@ -234,24 +320,27 @@ export default function FundReconPage() {
             <tbody>
               {data?.rows.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="text-center muted py-4">
-                    {summary?.all.total === 0
-                      ? 'ยังไม่มี visit ที่เข้าเงื่อนไข ตรวจว่าตั้งค่ารายการในกองทุนแล้ว และดึงข้อมูล HOSxP ของช่วงนี้แล้ว'
+                  <td colSpan={12} className="text-center muted py-4">
+                    {summary?.all.visits === 0 && summary?.all.extraCount === 0
+                      ? 'ยังไม่มี visit ที่เข้าเกณฑ์ ตรวจว่าตั้งค่ารายการในกองทุนแล้ว และดึงข้อมูล HOSxP ของช่วงนี้แล้ว'
                       : 'ไม่พบรายการที่ตรงกับเงื่อนไข'}
                   </td>
                 </tr>
               )}
               {data?.rows.map((r) => (
-                <tr key={`${r.fund_code}-${r.vn}`}>
+                <tr key={`${r.fund_code}-${r.vn ?? r.line_id}`}>
                   <td><FundStatus status={r.fund_status} /></td>
                   <td>{r.fund_code}</td>
                   <td>{thaiDate(r.sdate)}</td>
-                  <td>{r.hn}<div className="small-id">{r.vn}</div></td>
+                  <td>{r.hn || '–'}<div className="small-id">{r.vn || 'ไม่มี VN'}</div></td>
                   <td className="wrap">{r.patient_name || '–'}<div className="small-id">{r.cid}</div></td>
-                  <td className="wrap">{r.items}</td>
+                  <td>{r.pttype_name || '–'}{r.pttype && <div className="small-id">{r.pttype}</div>}</td>
+                  <td className={`wrap ${r.fund_status === 'EXTRA_PAID' ? 'text-primary-emphasis' : ''}`}>{r.items}</td>
                   <td className="num">{money(r.his_fund_amount)}</td>
                   <td className="num">{money(r.stm_fund_amount)}</td>
-                  <td className="num"><Diff value={r.stm_fund_amount === null ? null : r.stm_fund_amount - r.his_fund_amount} /></td>
+                  <td className="num">
+                    <Diff value={r.stm_fund_amount === null || r.his_fund_amount === null ? null : r.stm_fund_amount - r.his_fund_amount} />
+                  </td>
                   <td>{r.rep_no || '–'}<div className="small-id">{r.tran_id}</div></td>
                   <td>{r.error_code ? <span className="text-danger">{r.error_code}</span> : '–'}</td>
                 </tr>

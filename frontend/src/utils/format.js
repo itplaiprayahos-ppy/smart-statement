@@ -103,4 +103,36 @@ export const FUND_STATUS_META = {
   DENIED:   { label: 'ถูกปฏิเสธ / ติด C',        color: 'var(--st-denied)',  hint: 'สปสช. ส่งรหัสข้อผิดพลาดกลับมา' },
   NOT_SENT: { label: 'ไม่พบใน Statement',       color: 'var(--st-not-stm)', hint: 'ยังไม่ส่งเบิก หรือยังไม่มีผลจาก สปสช.' },
 };
+/** สถานะของ visit ที่เข้าเกณฑ์ (ไม่รวมผลตรวจย้อนกลับ) */
 export const FUND_STATUS_ORDER = Object.keys(FUND_STATUS_META);
+
+/** ผลตรวจย้อนกลับ: ได้รับเงินกองทุน แต่ไม่เข้าเกณฑ์ตามการตั้งค่า */
+export const EXTRA_PAID_META = {
+  label: 'ได้รับเงินแต่ไม่เข้าเกณฑ์', color: 'var(--st-not-his)',
+  hint: 'สปสช. จ่ายเงินกองทุนนี้ แต่ visit ไม่มีรายการหรือสิทธิตามที่ตั้งค่า',
+};
+export const ALL_FUND_STATUS_META = { ...FUND_STATUS_META, EXTRA_PAID: EXTRA_PAID_META };
+
+const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+/** 'YYYY-MM' -> 'ต.ค. 68' */
+export function thaiMonth(ym) {
+  const [y, m] = ym.split('-').map(Number);
+  return `${TH_MONTHS[m - 1]} ${String(y + 543).slice(2)}`;
+}
+
+/** รายการเดือน 'YYYY-MM' ทั้งหมดในช่วงวันที่ */
+export function monthsBetween(dateFrom, dateTo) {
+  const out = [];
+  let [y, m] = dateFrom.split('-').map(Number);
+  const end = dateTo.slice(0, 7);
+  for (let i = 0; i < 24; i += 1) {
+    const ym = `${y}-${String(m).padStart(2, '0')}`;
+    if (ym > end) break;
+    out.push(ym);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+export const percent = (part, whole) => (whole ? `${((part / whole) * 100).toFixed(1)}%` : '–');

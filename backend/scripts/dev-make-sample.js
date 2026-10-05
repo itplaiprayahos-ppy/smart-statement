@@ -1,4 +1,5 @@
 // สร้างไฟล์ REP ตัวอย่างจากฐาน HOSxP จำลอง (db/dev/mock_hosxp.sql) สำหรับทดสอบการนำเข้า
+// โครงสร้างเลียนแบบไฟล์ REP OPD จริงจาก e-Claim: หัวรายงานด้านบน + หัวตาราง 3 ชั้น
 // ใช้: npm run sample  (ต้องตั้ง HOSXP_* ใน .env ให้ชี้ฐานจำลอง)
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,9 +12,58 @@ const toThaiDate = (iso) => {
   const [y, m, d] = iso.split('-');
   return `${d}/${m}/${Number(y) + 543}`;
 };
-
 // เขียนเป็นเลข serial ของ Excel ตรง ๆ (เลี่ยงปัญหา timezone ของ Date object)
 const toExcelSerial = (iso) => Date.parse(`${iso}T00:00:00Z`) / 86_400_000 + 25569;
+
+// ---------- หัวตาราง 3 ชั้น ----------
+const MAIN = ['REP', 'ลำดับที่', 'TRAN_ID', 'HN', 'AN', 'PID', 'ชื่อ - สกุล', 'วันเข้ารักษา',
+  'วันจำหน่าย', 'MAININSCL', 'PROJCODE', 'เรียกเก็บ'];                         // 0-11 merge แนวตั้ง 3 แถว
+const COL = {
+  IP_PRB: 12, IP_ADJRW: 13,                                                   // กลุ่ม "กองทุน IP"
+  OP: 14, IP_CALC: 15, IP_PAID: 16, HC: 17, HC_DRUG: 18, AE: 19, AE_DRUG: 20,
+  INST: 21, DMIS_CALC: 22, DMIS_PAID: 23, DMIS_DRUG: 24, PALL: 25, DMISHD: 26, PP: 27, FS: 28,
+  TOTAL: 29,                                                                  // ยอดชดเชยทั้งสิ้น
+};
+const WIDTH = 30;
+const HEAD = 11; // index แถวหัวตารางแถวแรก (แถว 12 ใน Excel)
+
+function headerRows() {
+  const top = Array(WIDTH).fill(null);
+  const mid = Array(WIDTH).fill(null);
+  const bot = Array(WIDTH).fill(null);
+  MAIN.forEach((h, c) => { top[c] = h; });
+  top[COL.IP_PRB] = 'กองทุน IP';
+  mid[COL.IP_PRB] = 'พรบ.'; bot[COL.IP_PRB] = '(2)';
+  mid[COL.IP_ADJRW] = 'AdjRW'; bot[COL.IP_ADJRW] = '(3)';
+  top[COL.OP] = 'ยอดจ่ายชดเชย';
+  mid[COL.OP] = 'OP';
+  mid[COL.IP_CALC] = 'IP'; bot[COL.IP_CALC] = 'ยอดชดเชยที่คำนวณได้'; bot[COL.IP_PAID] = 'ยอดชดเชยที่จ่ายจริง';
+  mid[COL.HC] = 'HC'; bot[COL.HC] = 'HC'; bot[COL.HC_DRUG] = 'DRUG';
+  mid[COL.AE] = 'AE'; bot[COL.AE] = 'AE'; bot[COL.AE_DRUG] = 'DRUG';
+  mid[COL.INST] = 'INST';
+  mid[COL.DMIS_CALC] = 'DMIS';
+  bot[COL.DMIS_CALC] = 'ยอดชดเชยที่คำนวณได้'; bot[COL.DMIS_PAID] = 'ยอดชดเชยที่จ่ายจริง'; bot[COL.DMIS_DRUG] = 'DMIS_DRUG';
+  mid[COL.PALL] = 'Palliative care'; mid[COL.DMISHD] = 'DMISHD'; mid[COL.PP] = 'PP'; mid[COL.FS] = 'FS';
+  top[COL.TOTAL] = 'ยอดชดเชยทั้งสิ้น';
+  return [top, mid, bot];
+}
+
+function merges() {
+  const m = (r1, c1, r2, c2) => ({ s: { r: HEAD + r1, c: c1 }, e: { r: HEAD + r2, c: c2 } });
+  return [
+    ...MAIN.map((_, c) => m(0, c, 2, c)),                 // คอลัมน์หลัก แนวตั้ง 3 แถว
+    m(0, COL.IP_PRB, 0, COL.IP_ADJRW),                    // กองทุน IP
+    m(0, COL.OP, 0, COL.FS),                              // หัวกลุ่มยอดจ่าย
+    m(1, COL.OP, 2, COL.OP),
+    m(1, COL.IP_CALC, 1, COL.IP_PAID),
+    m(1, COL.HC, 1, COL.HC_DRUG),
+    m(1, COL.AE, 1, COL.AE_DRUG),
+    m(1, COL.INST, 2, COL.INST),
+    m(1, COL.DMIS_CALC, 1, COL.DMIS_DRUG),
+    m(1, COL.PALL, 2, COL.PALL), m(1, COL.DMISHD, 2, COL.DMISHD), m(1, COL.PP, 2, COL.PP), m(1, COL.FS, 2, COL.FS),
+    m(0, COL.TOTAL, 2, COL.TOTAL),
+  ];
+}
 
 async function main() {
   const { rows } = await hosxp.query(`
@@ -30,64 +80,61 @@ async function main() {
   const itemsOf = {};
   itemRows.forEach((r) => { (itemsOf[r.vn] ||= {})[r.icode] = Number(r.amt); });
 
-  // หัวตาราง 2 ชั้น แบบไฟล์ REP: คอลัมน์หลัก merge แนวตั้ง, กลุ่มกองทุน merge แนวนอน
-  const main = ['REP No.', 'TRAN_ID', 'HN', 'AN', 'PID', 'ชื่อ-สกุล', 'วันเข้ารักษา',
-    'สิทธิ', 'เรียกเก็บ', 'ชดเชยสุทธิ', 'ERROR CODE'];
-  const top = [...main, 'HC', null, 'AE', null, 'INST', 'DMIS', null, null, null];
-  const sub = [...main.map(() => null), 'HC', 'DRUG', 'AE', 'DRUG', null,
-    'ยอดชดเชยที่จ่ายจริง', 'DMISHD', 'Palliative care', 'PP'];
   const aoa = [
-    ['รายงานผลการพิจารณาจ่ายชดเชย (ข้อมูลตัวอย่าง)'],
-    ['หน่วยบริการ: 99999 โรงพยาบาลทดสอบ'],
+    ['ออกรายงานวันที่ 05/10/2569 เวลา 09:39 (ข้อมูลตัวอย่าง)'],
     [],
-    top,
-    sub,
+    ['โรงพยาบาล 99999 รพ.ทดสอบ'],
+    ['จังหวัด ทดสอบ'],
+    [],
+    ['เลขที่เอกสาร 99999 OPUCS256909 01'],
+    [], [], [],
+    ['ข้อมูลปกติ'],
+    [],
+    ...headerRows(),
   ];
-  const HEAD = 3; // index แถวหัวตารางแถวแรก
 
+  let seq = 0;
   rows.forEach((v, k) => {
     if (k % 10 === 3) return; // ไม่ส่ง -> ไม่พบใน Statement
     const amount = Number(v.uc_money);
-    let claim = amount;
-    let comp = amount;
-    let err = '';
-    if (k % 10 === 5) { claim = amount + 120; comp = amount + 120; } // ยอดต่าง
-    if (k % 10 === 7) { comp = 0; err = 'C438'; }                    // ติด C
-    // ครึ่งหนึ่งเป็นข้อความวันที่ พ.ศ. อีกครึ่งเป็น Excel date เพื่อทดสอบการอ่านวันที่
-    const date = k % 2 ? toThaiDate(v.vstdate) : toExcelSerial(v.vstdate);
-    // ยอดกองทุน: ได้รับ 80% ของค่าบริการ ยกเว้นบางรายที่ไม่ได้รับเงินกองทุน (ทดสอบสถานะ "ไม่ได้รับเงินกองทุนนี้")
+    const claim = k % 10 === 5 ? amount + 120 : amount; // ยอดต่าง
+    // ยอดกองทุน: ได้รับ 80% ของค่าบริการ ยกเว้นบางรายที่ไม่ได้รับเงินกองทุน
     const it = itemsOf[v.vn] || {};
-    const pay = (icode) => (it[icode] && k % 4 !== 1 && !err ? Math.round(it[icode] * 0.8) : 0);
-    aoa.push(['690900' + String(1 + (k % 3)), `T${v.vn}`, v.hn, '', v.cid, v.name, date,
-      'UCS', claim, comp, err,
-      pay('3000001'), pay('1600001'), pay('3100001'), 0, pay('3200001'), 0, 0, 0, pay('3300001')]);
+    const pay = (icode) => (it[icode] && k % 4 !== 1 ? Math.round(it[icode] * 0.8) : 0);
+    const row = Array(WIDTH).fill(0);
+    const date = k % 2 ? toThaiDate(v.vstdate) : toExcelSerial(v.vstdate);
+    [`690900${1 + (k % 3)}`, ++seq, `T${v.vn}`, v.hn, '', v.cid, v.name, date, date, 'UCS', '', claim]
+      .forEach((x, c) => { row[c] = x; });
+    row[COL.OP] = k % 10 === 7 ? 0 : amount;
+    row[COL.HC] = pay('3000001');
+    row[COL.HC_DRUG] = pay('1600001');
+    row[COL.AE] = pay('3100001');
+    row[COL.INST] = pay('3200001');
+    row[COL.PP] = pay('3300001');
+    row[COL.TOTAL] = row[COL.OP] + row[COL.HC] + row[COL.HC_DRUG] + row[COL.AE] + row[COL.INST] + row[COL.PP];
+    aoa.push(row);
   });
 
-  // รายการที่ไม่มีใน HOSxP
-  aoa.push(['6909001', 'T999999000001', '000099999', '', '3999999999991', 'นายนอก ระบบ',
-    '10/09/2569', 'UCS', 500, 500, '']);
-  aoa.push(['6909002', 'T999999000002', '000099998', '', '3999999999992', 'นางนอก ระบบ',
-    '20/09/2569', 'UCS', 650, 0, 'C301']);
-  aoa.push([]);
-  aoa.push(['', '', '', '', '', '', '', 'รวม', '', '', '']);
+  // รายการที่ไม่มีใน HOSxP (ได้รับเงิน HC -> ตรวจย้อนกลับ)
+  const extra = Array(WIDTH).fill(0);
+  ['6909001', ++seq, 'T999999000001', '000099999', '', '3999999999991', 'นายนอก ระบบ', '10/09/2569',
+    '10/09/2569', 'UCS', '', 500].forEach((x, c) => { extra[c] = x; });
+  extra[COL.HC] = 400; extra[COL.TOTAL] = 400;
+  aoa.push(extra);
 
   const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!merges'] = [
-    ...main.map((_, c) => ({ s: { r: HEAD, c }, e: { r: HEAD + 1, c } })),
-    { s: { r: HEAD, c: 11 }, e: { r: HEAD, c: 12 } },     // HC
-    { s: { r: HEAD, c: 13 }, e: { r: HEAD, c: 14 } },     // AE
-    { s: { r: HEAD, c: 15 }, e: { r: HEAD + 1, c: 15 } }, // INST
-    { s: { r: HEAD, c: 16 }, e: { r: HEAD, c: 19 } },     // DMIS
-  ];
-  // จัดรูปแบบเซลล์วันที่ที่เป็นตัวเลขให้แสดงเป็นวันที่ใน Excel
+  ws['!merges'] = merges();
   aoa.forEach((row, r) => {
-    const cell = ws[XLSX.utils.encode_cell({ r, c: 6 })];
-    if (r > HEAD + 1 && cell && cell.t === 'n') cell.z = 'dd/mm/yyyy';
+    if (r <= HEAD + 2) return;
+    [7, 8].forEach((c) => {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      if (cell && cell.t === 'n') cell.z = 'dd/mm/yyyy';
+    });
   });
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'REP');
+  XLSX.utils.book_append_sheet(wb, ws, 'รายละเอียด(ข้อมูลปกติ) 1 OP');
   XLSX.writeFile(wb, out);
-  console.log(`✔ สร้าง ${out} (${aoa.length - 5} แถว)`);
+  console.log(`✔ สร้าง ${out} (${aoa.length - HEAD - 3} แถว)`);
   await hosxp.end();
 }
 

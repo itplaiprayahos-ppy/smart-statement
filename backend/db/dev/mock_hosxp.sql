@@ -8,12 +8,14 @@ DROP TABLE IF EXISTS opitemrece, nondrugitems, drugitems, vn_stat, patient, ptty
 CREATE TABLE pttype (
   pttype        VARCHAR(2) PRIMARY KEY,
   name          VARCHAR(200),
-  hipdata_code  VARCHAR(10)
+  hipdata_code  VARCHAR(10),
+  isuse         CHAR(1) DEFAULT 'Y'
 );
 INSERT INTO pttype VALUES
-  ('10', 'บัตรทอง (UC)', 'UCS'),
-  ('20', 'ข้าราชการ', 'OFC'),
-  ('30', 'ชำระเงินเอง', 'A1');
+  ('10', 'บัตรทอง (UC)', 'UCS', 'Y'),
+  ('20', 'ข้าราชการ', 'OFC', 'Y'),
+  ('30', 'ชำระเงินเอง', 'A1', 'Y'),
+  ('99', 'บัตรทอง (เลิกใช้)', 'UCS', 'N');
 
 CREATE TABLE patient (
   hn     VARCHAR(9) PRIMARY KEY,
@@ -63,26 +65,30 @@ INSERT INTO vn_stat VALUES
 -- รายการค่าบริการ / ยา และค่าใช้จ่ายราย visit (ใช้ทดสอบการแยกกองทุน)
 -- ---------------------------------------------------------------------
 CREATE TABLE nondrugitems (
-  icode  VARCHAR(7) PRIMARY KEY,
-  name   VARCHAR(200),
-  price  NUMERIC(12,2)
+  icode   VARCHAR(7) PRIMARY KEY,
+  name    VARCHAR(200),
+  price    NUMERIC(12,2),
+  istatus  CHAR(1) DEFAULT 'Y'
 );
 INSERT INTO nondrugitems VALUES
-  ('3000001', 'CT Scan สมอง', 3500),
-  ('3000002', 'ฉายรังสีรักษา', 2000),
-  ('3100001', 'ค่าทำแผลอุบัติเหตุ', 300),
-  ('3200001', 'เลนส์แก้วตาเทียม', 2800),
-  ('3300001', 'ฝังยาคุมกำเนิด', 800),
-  ('3400001', 'ค่าบริการผู้ป่วยนอก', 50);
+  ('3000001', 'CT Scan สมอง', 3500, 'Y'),
+  ('3000002', 'ฉายรังสีรักษา', 2000, 'Y'),
+  ('3000009', 'CT Scan (รหัสเก่า เลิกใช้)', 3000, 'N'),
+  ('3100001', 'ค่าทำแผลอุบัติเหตุ', 300, 'Y'),
+  ('3200001', 'เลนส์แก้วตาเทียม', 2800, 'Y'),
+  ('3300001', 'ฝังยาคุมกำเนิด', 800, 'Y'),
+  ('3400001', 'ค่าบริการผู้ป่วยนอก', 50, 'Y');
 
 CREATE TABLE drugitems (
   icode     VARCHAR(7) PRIMARY KEY,
   name      VARCHAR(200),
-  strength  VARCHAR(100)
+  strength  VARCHAR(100),
+  istatus   CHAR(1) DEFAULT 'Y'
 );
 INSERT INTO drugitems VALUES
-  ('1600001', 'Capecitabine', '500 mg'),
-  ('1000001', 'Paracetamol', '500 mg');
+  ('1600001', 'Capecitabine', '500 mg', 'Y'),
+  ('1600009', 'Capecitabine (เลิกใช้)', '150 mg', 'N'),
+  ('1000001', 'Paracetamol', '500 mg', 'Y');
 
 CREATE TABLE opitemrece (
   hos_guid   SERIAL PRIMARY KEY,

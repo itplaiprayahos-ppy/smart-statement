@@ -3,7 +3,7 @@ import { db, withTransaction } from '../config/db.js';
 import { requireRole } from '../middleware/auth.js';
 import { asyncHandler, HttpError } from '../utils/http.js';
 import { audit } from '../utils/audit.js';
-import { searchItems } from '../services/hosxpService.js';
+import { listPttypes, searchItems } from '../services/hosxpService.js';
 
 const router = Router();
 
@@ -25,6 +25,15 @@ router.get('/items/search', requireRole('admin'), asyncHandler(async (req, res) 
     res.json(await searchItems(source, q));
   } catch (err) {
     throw new HttpError(502, `ค้นหาใน HOSxP ไม่สำเร็จ: ${err.message}`);
+  }
+}));
+
+/** สิทธิการรักษาที่ใช้งานอยู่จาก HOSxP (ต้องอยู่ก่อน /:code) */
+router.get('/pttypes', requireRole('admin'), asyncHandler(async (_req, res) => {
+  try {
+    res.json(await listPttypes());
+  } catch (err) {
+    throw new HttpError(502, `อ่านสิทธิการรักษาจาก HOSxP ไม่สำเร็จ: ${err.message}`);
   }
 }));
 
@@ -50,8 +59,10 @@ function readFund(body = {}) {
     item_name: it.item_name ? String(it.item_name).slice(0, 300) : null,
     source: it.source === 'drug' ? 'drug' : 'nondrug',
   })).filter((it) => it.icode);
+  const pttypes = [...new Set((Array.isArray(body.pttypes) ? body.pttypes : [])
+    .map((p) => String(p).trim()).filter(Boolean))];
   return {
-    code, name, cols, items,
+    code, name, cols, items, pttypes,
     sort_order: Number.isInteger(Number(body.sort_order)) ? Number(body.sort_order) : 0,
     is_active: body.is_active !== false,
   };
@@ -63,15 +74,16 @@ async function saveFund(req, res, originalCode) {
   const saved = await withTransaction(async (client) => {
     if (originalCode) {
       const { rowCount } = await client.query(
-        `UPDATE funds SET code = $1, name = $2, stm_columns = $3, sort_order = $4, is_active = $5, updated_at = now()
+        `UPDATE funds SET code = $1, name = $2, stm_columns = $3, sort_order = $4, is_active = $5, pttypes = $7,
+           updated_at = now()
          WHERE code = $6`,
-        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, originalCode],
+        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, originalCode, JSON.stringify(f.pttypes)],
       );
       if (!rowCount) throw new HttpError(404, 'ไม่พบกองทุน');
     } else {
       await client.query(
-        'INSERT INTO funds (code, name, stm_columns, sort_order, is_active) VALUES ($1, $2, $3, $4, $5)',
-        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active],
+        'INSERT INTO funds (code, name, stm_columns, sort_order, is_active, pttypes) VALUES ($1, $2, $3, $4, $5, $6)',
+        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, JSON.stringify(f.pttypes)],
       );
     }
     // แทนที่รายการ แต่คงเวลาเพิ่มเดิมไว้ เพื่อให้รู้ว่ารายการไหนเพิ่มใหม่หลังดึง HOSxP
@@ -89,7 +101,9 @@ async function saveFund(req, res, originalCode) {
     if (err.code === '23505') throw new HttpError(409, 'มีรหัสกองทุนนี้แล้ว');
     throw err;
   });
-  await audit(req, originalCode ? 'fund_update' : 'fund_create', { code: saved.code, items: saved.items.length });
+  await audit(req, originalCode ? 'fund_update' : 'fund_create', {
+    code: saved.code, items: saved.items.length, pttypes: saved.pttypes,
+  });
   res.status(originalCode ? 200 : 201).json({ code: saved.code });
 }
 

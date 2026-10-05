@@ -38,23 +38,47 @@ const ITEMS_SQL = `
   GROUP BY o.vn, o.icode
 `;
 
+/**
+ * เงื่อนไข "ใช้งานอยู่" ของตารางหลักใน HOSxP
+ * ใช้กับรายการให้เลือกตอนตั้งค่าเท่านั้น (ค่าบริการ / ยา / สิทธิ) ไม่ใช้กับค่าใช้จ่ายย้อนหลังใน opitemrece
+ * เพราะรายการที่เลิกใช้วันนี้ อาจเคยถูกคิดเงินจริงในช่วงเวลาที่ตรวจ
+ * ถ้า HOSxP ของรพ.ใช้ชื่อคอลัมน์อื่น (เช่น istatus, isuse) แก้ที่นี่ที่เดียว
+ */
+const ACTIVE = {
+  nondrug: "n.istatus = 'Y'",
+  drug: "d.istatus = 'Y'",
+  pttype: "p.isuse = 'Y'",
+};
+
 /** ค้นหารายการหลักจาก HOSxP เพื่อเลือกตอนตั้งค่ากองทุน */
 const SEARCH_SQL = {
   nondrug: `
-    SELECT icode, name, price
-    FROM nondrugitems
-    WHERE icode ILIKE $1 || '%' OR name ILIKE '%' || $1 || '%'
-    ORDER BY name LIMIT 50`,
+    SELECT n.icode, n.name, n.price
+    FROM nondrugitems n
+    WHERE ${ACTIVE.nondrug}
+      AND (n.icode ILIKE $1 || '%' OR n.name ILIKE '%' || $1 || '%')
+    ORDER BY n.name LIMIT 50`,
   drug: `
-    SELECT icode, CONCAT_WS(' ', name, strength) AS name, NULL::numeric AS price
-    FROM drugitems
-    WHERE icode ILIKE $1 || '%' OR name ILIKE '%' || $1 || '%'
-    ORDER BY name LIMIT 50`,
+    SELECT d.icode, CONCAT_WS(' ', d.name, d.strength) AS name, NULL::numeric AS price
+    FROM drugitems d
+    WHERE ${ACTIVE.drug}
+      AND (d.icode ILIKE $1 || '%' OR d.name ILIKE '%' || $1 || '%')
+    ORDER BY d.name LIMIT 50`,
 };
 
 export async function searchItems(source, q) {
   const { rows } = await hosxp.query(SEARCH_SQL[source], [q]);
   return rows.map((r) => ({ ...r, source }));
+}
+
+/** รายการสิทธิการรักษาที่ใช้งานอยู่ สำหรับตั้งค่าเงื่อนไขกองทุน */
+export async function listPttypes() {
+  const { rows } = await hosxp.query(`
+    SELECT p.pttype, p.name, p.hipdata_code
+    FROM pttype p
+    WHERE ${ACTIVE.pttype}
+    ORDER BY p.hipdata_code NULLS LAST, p.pttype`);
+  return rows;
 }
 
 const ITEM_COLS = ['vn', 'icode', 'vstdate', 'qty', 'sum_price'];

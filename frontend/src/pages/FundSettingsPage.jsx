@@ -4,7 +4,65 @@ import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
 import { money } from '../utils/format.js';
 
 const SOURCE_LABEL = { nondrug: 'ค่าบริการ', drug: 'ยา' };
-const blankFund = () => ({ originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [] });
+const blankFund = () => ({
+  originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], pttypes: [],
+});
+
+/** เลือกสิทธิการรักษาของ HOSxP ที่เข้าเงื่อนไขกองทุน (ไม่เลือก = ทุกสิทธิ) */
+function PttypePicker({ list, error, value, onChange }) {
+  const [filter, setFilter] = useState('');
+  const selected = new Set(value);
+  const known = new Set(list.map((p) => p.pttype));
+  const shown = list.filter((p) => {
+    const q = filter.trim().toLowerCase();
+    return !q || p.pttype.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)
+      || (p.hipdata_code || '').toLowerCase() === q;
+  });
+  const toggle = (code) => onChange(selected.has(code) ? value.filter((c) => c !== code) : [...value, code]);
+
+  return (
+    <div className="panel">
+      <div className="panel-title mb-1">สิทธิการรักษาที่เข้าเงื่อนไข ({value.length ? `${value.length} สิทธิ` : 'ทุกสิทธิ'})</div>
+      <p className="small muted">visit ต้องมีสิทธิตามที่เลือกจึงจะนับเข้ากองทุนนี้ ถ้าไม่เลือกเลยจะนับทุกสิทธิ แสดงเฉพาะสิทธิที่ใช้งานอยู่ใน HOSxP</p>
+      {error && <div className="alert alert-warning py-2 small">{error}</div>}
+      {value.filter((c) => !known.has(c)).length > 0 && list.length > 0 && (
+        <div className="small text-warning-emphasis mb-2">
+          สิทธิที่เลือกไว้แต่ไม่พบหรือเลิกใช้แล้วใน HOSxP: {value.filter((c) => !known.has(c)).join(', ')}{' '}
+          <button type="button" className="btn btn-link btn-sm p-0 align-baseline" onClick={() => onChange(value.filter((c) => known.has(c)))}>นำออก</button>
+        </div>
+      )}
+      <div className="d-flex gap-2 mb-2">
+        <input className="form-control form-control-sm" placeholder="ค้นหารหัส ชื่อสิทธิ หรือกลุ่ม เช่น UCS" value={filter}
+          onChange={(e) => setFilter(e.target.value)} aria-label="ค้นหาสิทธิ" />
+        <button type="button" className="btn btn-sm btn-outline-primary text-nowrap"
+          onClick={() => onChange([...new Set([...value, ...shown.map((p) => p.pttype)])])} disabled={!shown.length}>
+          เลือกที่แสดงทั้งหมด
+        </button>
+        <button type="button" className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => onChange([])} disabled={!value.length}>
+          ล้าง
+        </button>
+      </div>
+      <div className="item-results border rounded">
+        <table className="table table-sm table-hover data-table mb-0">
+          <tbody>
+            {shown.map((p) => (
+              <tr key={p.pttype} onClick={() => toggle(p.pttype)} style={{ cursor: 'pointer' }}>
+                <td style={{ width: 36 }}>
+                  <input type="checkbox" className="form-check-input" checked={selected.has(p.pttype)} readOnly
+                    aria-label={`เลือกสิทธิ ${p.pttype} ${p.name}`} />
+                </td>
+                <td style={{ width: 60 }}>{p.pttype}</td>
+                <td className="wrap">{p.name}</td>
+                <td className="small-id">{p.hipdata_code}</td>
+              </tr>
+            ))}
+            {shown.length === 0 && <tr><td className="muted text-center py-3">ไม่พบสิทธิ</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export default function FundSettingsPage() {
   const [funds, setFunds] = useState([]);
@@ -15,9 +73,16 @@ export default function FundSettingsPage() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
+  const [pttypeList, setPttypeList] = useState([]);
+  const [pttypeError, setPttypeError] = useState('');
 
   const loadList = useCallback(() => api.get('/funds').then((r) => setFunds(r.data)).catch(showError), []);
   useEffect(() => { loadList(); }, [loadList]);
+  useEffect(() => {
+    api.get('/funds/pttypes')
+      .then((r) => setPttypeList(r.data))
+      .catch((err) => setPttypeError(err?.response?.data?.message || 'อ่านรายการสิทธิจาก HOSxP ไม่สำเร็จ'));
+  }, []);
 
   const confirmDiscard = async () => !dirty || confirmAction({
     title: 'ยังไม่ได้บันทึกการแก้ไข', text: 'ต้องการทิ้งการแก้ไขนี้หรือไม่', confirmText: 'ทิ้งการแก้ไข', danger: true,
@@ -32,6 +97,7 @@ export default function FundSettingsPage() {
       setForm({
         originalCode: data.code, code: data.code, name: data.name, sort_order: data.sort_order,
         is_active: data.is_active, columnsText: (data.stm_columns || []).join('\n'), items: data.items,
+        pttypes: data.pttypes || [],
       });
       setDirty(false);
     } catch (err) {
@@ -63,6 +129,7 @@ export default function FundSettingsPage() {
       code: form.code, name: form.name, sort_order: Number(form.sort_order) || 0, is_active: form.is_active,
       stm_columns: form.columnsText.split('\n').map((s) => s.trim()).filter(Boolean),
       items: form.items,
+      pttypes: form.pttypes,
     };
     setBusy(true);
     try {
@@ -103,7 +170,7 @@ export default function FundSettingsPage() {
       <div className="page-head">
         <div>
           <h1>ตั้งค่ากองทุน</h1>
-          <p>กำหนดรายการค่าบริการหรือยาของแต่ละกองทุน visit ที่มีรายการเหล่านี้อย่างน้อย 1 รายการจะถูกนับเข้ากองทุนนั้น</p>
+          <p>visit จะนับเข้ากองทุนเมื่อมีรายการค่าบริการหรือยาที่ตั้งไว้อย่างน้อย 1 รายการ และสิทธิการรักษาตรงตามที่เลือก</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => open(null)}>
           <i className="bi bi-plus-lg me-1" />เพิ่มกองทุน
@@ -124,6 +191,7 @@ export default function FundSettingsPage() {
                   </span>
                 </div>
                 <div className="small">{f.name}{!f.is_active && <span className="muted"> (ปิดใช้งาน)</span>}</div>
+                <div className="small-id">{f.pttypes?.length ? `สิทธิ ${f.pttypes.join(', ')}` : 'ทุกสิทธิ'}</div>
               </button>
             ))}
           </div>
@@ -151,10 +219,11 @@ export default function FundSettingsPage() {
                   <div className="col-12">
                     <label className="form-label" htmlFor="fs-cols">คอลัมน์ยอดที่ได้รับในไฟล์ REP</label>
                     <textarea id="fs-cols" className="form-control" rows={2} value={form.columnsText}
-                      onChange={(e) => update({ columnsText: e.target.value })} placeholder="เช่น HC / HC" />
+                      onChange={(e) => update({ columnsText: e.target.value })} placeholder="เช่น HC" />
                     <div className="form-text">
-                      บรรทัดละ 1 คอลัมน์ ถ้าหลายคอลัมน์ระบบจะรวมยอดให้ หัวตารางหลายชั้นเขียนแบบ “กลุ่ม / คอลัมน์ย่อย”
-                      คัดลอกชื่อที่ถูกต้องได้จาก “หัวคอลัมน์ทั้งหมดในไฟล์” ในหน้าตรวจไฟล์ นำเข้าไฟล์ใหม่หลังแก้คอลัมน์
+                      ใส่ชื่อกองทุนตามหัวตารางแถวที่ 13 ของไฟล์ REP เช่น HC, AE, INST, DMIS, PP บรรทัดละ 1 ชื่อ
+                      ระบบรวมทุกคอลัมน์ย่อยใต้ชื่อนั้นให้ (HC = HC + DRUG) ยกเว้นกลุ่มที่มี “ยอดชดเชยที่จ่ายจริง” จะใช้เฉพาะคอลัมน์นั้น
+                      ถ้าต้องการคอลัมน์เดียว ใส่ชื่อเต็มแบบ “กลุ่ม / คอลัมน์ย่อย” นำเข้าไฟล์ใหม่ทุกครั้งหลังแก้
                     </div>
                   </div>
                   <div className="col-12">
@@ -165,6 +234,8 @@ export default function FundSettingsPage() {
                   </div>
                 </div>
               </div>
+
+              <PttypePicker list={pttypeList} error={pttypeError} value={form.pttypes} onChange={(pttypes) => update({ pttypes })} />
 
               <div className="panel">
                 <div className="panel-title">รายการที่เข้าเงื่อนไข ({form.items.length})</div>
