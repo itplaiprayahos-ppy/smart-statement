@@ -37,6 +37,33 @@ export const DEFAULT_OPD_MAPPING = {
 
 const MAX_ERRORS = 500;
 
+/**
+ * เลขเอกสาร Statement เช่น "เลขที่เอกสาร 11344 OPUCS256908 01" หรือชื่อไฟล์ "STM_11344_OPUCS256908_01.xls"
+ * -> "OPUCS256908-01" ใช้แยกรอบ STM (รายการเดียวกันในรอบต่างกันจะเก็บแยกกัน)
+ */
+export function normalizeStmDoc(text) {
+  const m = String(text ?? '').match(/([A-Z]{2,}[0-9]{6,})(?:[_\s]+([0-9]{1,3}))?/);
+  return m ? m[1] + (m[2] ? `-${m[2]}` : '') : null;
+}
+
+/** "OPUCS256908-01" -> '2026-08-01' (เดือนของรอบ Statement) */
+export function stmPeriodOf(doc) {
+  const m = String(doc ?? '').match(/(25\d{2})(0[1-9]|1[0-2])/);
+  return m ? `${Number(m[1]) - 543}-${m[2]}-01` : null;
+}
+
+/** หาเลขเอกสารจากหัวรายงานเหนือตาราง ถ้าไม่พบใช้ชื่อไฟล์ */
+function findStmDoc(rows, headerIdx, fileName) {
+  for (const row of rows.slice(0, Math.max(0, headerIdx))) {
+    const line = (row || []).filter((v) => v !== null && v !== undefined).join(' ');
+    if (/เลขที่เอกสาร/.test(line)) {
+      const doc = normalizeStmDoc(line);
+      if (doc) return doc;
+    }
+  }
+  return normalizeStmDoc(fileName);
+}
+
 const norm = (s) => String(s ?? '').replace(/\s+/g, '').toLowerCase();
 
 /** ตรวจ mapping ที่ admin บันทึก; คืนข้อความผิดพลาด หรือ null ถ้าถูกต้อง */
@@ -222,7 +249,7 @@ function parsePid(v) {
  * @param {{ mapping: object, header_row?: number|null, sheet_name?: string|null, claim_type: string }} profile
  * @param {{ code: string, stm_columns: string[] }[]} funds กองทุนที่ต้องอ่านยอดที่ได้รับแยก
  */
-export function parseExcel(buffer, profile, funds = []) {
+export function parseExcel(buffer, profile, funds = [], fileName = '') {
   let wb;
   try {
     wb = XLSX.read(buffer, { type: 'buffer', cellDates: false });
@@ -276,7 +303,12 @@ export function parseExcel(buffer, profile, funds = []) {
     fundColumns[f.code] = { matched: matched.map((c) => c.label), missing };
   }
 
+  const stmDoc = findStmDoc(rows, headerIdx, fileName);
+  const stmPeriod = stmPeriodOf(stmDoc);
+
   const result = {
+    stmDoc,
+    stmPeriod,
     sheetName,
     sheetNames: wb.SheetNames,
     headerRowNumber: headerIdx + 1 + offset,
@@ -289,6 +321,8 @@ export function parseExcel(buffer, profile, funds = []) {
     errors: [],
     errorCount: 0,
     totalRows: 0,
+    // แถวที่ไม่ได้อ่านเป็นข้อมูล (แถวรวมยอด / ส่วนท้ายรายงาน) แจ้งให้ผู้ใช้ตรวจได้ แต่ไม่นับเป็นข้อผิดพลาด
+    skipped: { count: 0, rows: [], endedAtRow: null },
   };
   if (missingRequired.length) return result;
 
@@ -298,18 +332,45 @@ export function parseExcel(buffer, profile, funds = []) {
     if (result.errors.length < MAX_ERRORS) result.errors.push({ row: rowNumber, message });
   };
 
+  const isBlank = (row) => !row || row.every((v) => text(v) === null);
+  const skip = (rowNumber) => {
+    result.skipped.count += 1;
+    if (result.skipped.rows.length < 200) result.skipped.rows.push(rowNumber);
+  };
+  let started = false;
+
   for (let i = headerIdx + depth; i < rows.length; i += 1) {
     const row = rows[i] || [];
     const rowNumber = i + 1 + offset; // เลขแถวตามที่เห็นใน Excel
-    const cell = (f) => (colIndex[f] === undefined ? null : row[colIndex[f]]);
 
+    // ตารางข้อมูลจบที่แถวว่างแถวแรกหลังเริ่มมีข้อมูล แถวต่อจากนั้นเป็นส่วนท้ายรายงาน ไม่อ่าน
+    if (isBlank(row)) {
+      if (started) {
+        const rest = rows.slice(i).map((r, k) => (isBlank(r) ? null : i + k + 1 + offset)).filter(Boolean);
+        if (rest.length) {
+          result.skipped.endedAtRow = rowNumber - 1;
+          rest.forEach(skip);
+        }
+        break;
+      }
+      continue;
+    }
+
+    const cell = (f) => (colIndex[f] === undefined ? null : row[colIndex[f]]);
     const pid = parsePid(cell('pid'));
     const rawDate = cell('service_date');
     const tranId = text(cell('tran_id'));
     const repNo = text(cell('rep_no'));
 
-    // ข้ามแถวว่าง/แถวรวมยอดท้ายตาราง
-    if (!pid && !rawDate && !tranId && !repNo) continue;
+    // แถวที่ไม่มีลักษณะเป็นข้อมูลคนไข้ (เช่น แถวรวมยอด) ข้ามโดยไม่นับเป็นข้อผิดพลาด:
+    // ไม่มีเลขบัตรรูปแบบตัวเลข 12-13 หลัก และไม่มีวันที่ที่อ่านได้คู่กับ TRAN_ID หรือ REP
+    const pidLike = pid && /^\d{12,13}$/.test(pid);
+    const dateLike = parseDate(rawDate) !== null && (tranId || repNo);
+    if (!pidLike && !dateLike) {
+      skip(rowNumber);
+      continue;
+    }
+    started = true;
     result.totalRows += 1;
 
     const problems = [];
@@ -338,7 +399,9 @@ export function parseExcel(buffer, profile, funds = []) {
     }
 
     const hn = text(cell('hn'));
-    const lineKey = tranId ? `T:${tranId}` : `R:${repNo ?? ''}|${pid}|${serviceDate}|${hn ?? ''}`;
+    // รายการเดียวกันในรอบ STM ต่างกัน เก็บแยกกัน (ยอดปรับปรุงรอบหลังจะไม่ทับรอบแรก)
+    const baseKey = tranId ? `T:${tranId}` : `R:${repNo ?? ''}|${pid}|${serviceDate}|${hn ?? ''}`;
+    const lineKey = stmDoc ? `${baseKey}|${stmDoc}` : baseKey;
     if (seen.has(lineKey)) {
       addError(rowNumber, `รายการซ้ำกับแถว ${seen.get(lineKey)} ในไฟล์เดียวกัน (ใช้แถวหลังสุด)`);
       result.records = result.records.filter((r) => r.line_key !== lineKey);
@@ -366,6 +429,8 @@ export function parseExcel(buffer, profile, funds = []) {
       compensated: comp.value,
       error_code: text(cell('error_code')),
       fund_amounts: fundAmounts,
+      stm_doc: stmDoc,
+      stm_period: stmPeriod,
       raw,
     });
   }

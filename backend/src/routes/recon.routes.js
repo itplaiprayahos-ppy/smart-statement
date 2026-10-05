@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { asyncHandler, HttpError } from '../utils/http.js';
 import { audit } from '../utils/audit.js';
 import { exportOpd, reconcileOpd, STATUSES } from '../services/reconService.js';
-import { exportFunds, FUND_STATUSES, reconcileFunds } from '../services/fundService.js';
+import { analyzeFundItems, exportFunds, FUND_STATUSES, reconcileFunds } from '../services/fundService.js';
 import { readDateRange } from './his.routes.js';
 
 const router = Router();
@@ -44,7 +44,8 @@ function readFundOptions(q) {
   const base = readOptions({ ...q, status: undefined });
   if (q.fundStatus && !FUND_STATUSES.includes(q.fundStatus)) throw new HttpError(400, 'สถานะไม่ถูกต้อง');
   if (q.fundCode && !/^[A-Z0-9_]{2,20}$/.test(q.fundCode)) throw new HttpError(400, 'รหัสกองทุนไม่ถูกต้อง');
-  return { ...base, fundCode: q.fundCode || null, fundStatus: q.fundStatus || null };
+  if (q.missing && !['required', 'common'].includes(q.missing)) throw new HttpError(400, 'ตัวกรองไม่ถูกต้อง');
+  return { ...base, fundCode: q.fundCode || null, fundStatus: q.fundStatus || null, missing: q.missing || null };
 }
 
 router.get('/funds', asyncHandler(async (req, res) => {
@@ -52,6 +53,11 @@ router.get('/funds', asyncHandler(async (req, res) => {
   const result = await reconcileFunds(opts);
   await audit(req, 'recon_view_funds', { dateFrom: opts.dateFrom, dateTo: opts.dateTo, fundCode: opts.fundCode });
   res.json(result);
+}));
+
+router.get('/funds/analysis', asyncHandler(async (req, res) => {
+  const opts = readFundOptions(req.query);
+  res.json(await analyzeFundItems(opts));
 }));
 
 router.get('/funds/export', asyncHandler(async (req, res) => {

@@ -24,17 +24,29 @@ const OPD_SQL = `
 `;
 
 /**
- * รายการค่าใช้จ่ายของ visit (opitemrece) เฉพาะ icode ที่ตั้งค่าในกองทุน
- * opitemrece เก็บทั้งค่าบริการ (nondrugitems) และยา (drugitems) ด้วย icode
+ * รายการค่าใช้จ่ายของ visit (opitemrece)
+ * ดึง "ทุกรายการ" ของ visit ที่มีรายการตามกองทุนอย่างน้อย 1 รายการ (visit อื่นไม่ดึง)
+ * เพื่อใช้เทียบว่าเคสที่เคลมสำเร็จมักมีรายการอะไรประกอบ
+ * ชื่อรายการดึงจาก nondrugitems / drugitems โดยไม่กรองสถานะใช้งาน เพราะเป็นค่าใช้จ่ายย้อนหลัง
  */
 const ITEMS_SQL = `
+  WITH target AS (
+    SELECT DISTINCT o.vn
+    FROM opitemrece o
+    WHERE o.vstdate BETWEEN $1 AND $2
+      AND o.vn IS NOT NULL AND o.vn <> ''
+      AND o.icode = ANY($3::text[])
+  )
   SELECT o.vn, o.icode, MIN(o.vstdate)::text AS vstdate,
          SUM(COALESCE(o.qty, 0))       AS qty,
-         SUM(COALESCE(o.sum_price, 0)) AS sum_price
+         SUM(COALESCE(o.sum_price, 0)) AS sum_price,
+         MAX(COALESCE(n.name, NULLIF(CONCAT_WS(' ', d.name, d.strength), ''))) AS item_name,
+         MAX(CASE WHEN n.icode IS NOT NULL THEN 'nondrug' WHEN d.icode IS NOT NULL THEN 'drug' END) AS source
   FROM opitemrece o
+  JOIN target t ON t.vn = o.vn
+  LEFT JOIN nondrugitems n ON n.icode = o.icode
+  LEFT JOIN drugitems d ON d.icode = o.icode
   WHERE o.vstdate BETWEEN $1 AND $2
-    AND o.vn IS NOT NULL AND o.vn <> ''
-    AND o.icode = ANY($3::text[])
   GROUP BY o.vn, o.icode
 `;
 
@@ -42,13 +54,16 @@ const ITEMS_SQL = `
  * เงื่อนไข "ใช้งานอยู่" ของตารางหลักใน HOSxP
  * ใช้กับรายการให้เลือกตอนตั้งค่าเท่านั้น (ค่าบริการ / ยา / สิทธิ) ไม่ใช้กับค่าใช้จ่ายย้อนหลังใน opitemrece
  * เพราะรายการที่เลิกใช้วันนี้ อาจเคยถูกคิดเงินจริงในช่วงเวลาที่ตรวจ
- * ถ้า HOSxP ของรพ.ใช้ชื่อคอลัมน์อื่น (เช่น istatus, isuse) แก้ที่นี่ที่เดียว
+ * ปรับตาม HOSxP ของรพ.: nondrugitems/drugitems ใช้ istatus, pttype ใช้ isuse
  */
 const ACTIVE = {
   nondrug: "n.istatus = 'Y'",
   drug: "d.istatus = 'Y'",
   pttype: "p.isuse = 'Y'",
 };
+
+/** แสดงผลค้นหาทั้งหมดที่ตรง แต่กันไว้ไม่เกินจำนวนนี้ เผื่อพิมพ์คำค้นกว้างเกินไป */
+export const SEARCH_LIMIT = 2000;
 
 /** ค้นหารายการหลักจาก HOSxP เพื่อเลือกตอนตั้งค่ากองทุน */
 const SEARCH_SQL = {
@@ -57,18 +72,21 @@ const SEARCH_SQL = {
     FROM nondrugitems n
     WHERE ${ACTIVE.nondrug}
       AND (n.icode ILIKE $1 || '%' OR n.name ILIKE '%' || $1 || '%')
-    ORDER BY n.name LIMIT 50`,
+    ORDER BY n.name LIMIT ${SEARCH_LIMIT + 1}`,
   drug: `
     SELECT d.icode, CONCAT_WS(' ', d.name, d.strength) AS name, NULL::numeric AS price
     FROM drugitems d
     WHERE ${ACTIVE.drug}
       AND (d.icode ILIKE $1 || '%' OR d.name ILIKE '%' || $1 || '%')
-    ORDER BY d.name LIMIT 50`,
+    ORDER BY d.name LIMIT ${SEARCH_LIMIT + 1}`,
 };
 
 export async function searchItems(source, q) {
   const { rows } = await hosxp.query(SEARCH_SQL[source], [q]);
-  return rows.map((r) => ({ ...r, source }));
+  return {
+    items: rows.slice(0, SEARCH_LIMIT).map((r) => ({ ...r, source })),
+    limited: rows.length > SEARCH_LIMIT,
+  };
 }
 
 /** รายการสิทธิการรักษาที่ใช้งานอยู่ สำหรับตั้งค่าเงื่อนไขกองทุน */
@@ -81,7 +99,7 @@ export async function listPttypes() {
   return rows;
 }
 
-const ITEM_COLS = ['vn', 'icode', 'vstdate', 'qty', 'sum_price'];
+const ITEM_COLS = ['vn', 'icode', 'vstdate', 'qty', 'sum_price', 'item_name', 'source'];
 
 const COLS = ['vn', 'hn', 'cid', 'ptname', 'vstdate', 'pttype', 'pttype_name', 'hipdata_code', 'pdx', 'income', 'uc_money'];
 const CHUNK = 1000;
@@ -143,7 +161,8 @@ async function replaceItems(client, dateFrom, dateTo, items) {
     await client.query(
       `INSERT INTO his_opd_items (${ITEM_COLS.join(',')}) VALUES ${values.join(',')}
        ON CONFLICT (vn, icode) DO UPDATE SET vstdate = EXCLUDED.vstdate, qty = EXCLUDED.qty,
-         sum_price = EXCLUDED.sum_price, pulled_at = now()`,
+         sum_price = EXCLUDED.sum_price, item_name = EXCLUDED.item_name, source = EXCLUDED.source,
+         pulled_at = now()`,
       params,
     );
   }

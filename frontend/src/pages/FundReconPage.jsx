@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/client.js';
 import Diff from '../components/Diff.jsx';
+import FundItemAnalysis from '../components/FundItemAnalysis.jsx';
 import MonthlyFundChart from '../components/MonthlyFundChart.jsx';
 import Pagination from '../components/Pagination.jsx';
 import PeriodFields from '../components/PeriodFields.jsx';
@@ -47,6 +48,8 @@ function buildSummary(data) {
       }
     });
   });
+  // ยอดตั้งเบิกรวม: ใช้ค่าจาก backend ที่นับแต่ละรายการครั้งเดียว แม้รายการอยู่หลายกองทุน
+  all.his = data.totals.his_amount ?? all.his;
   return { rows: Object.values(byFund), all };
 }
 
@@ -62,6 +65,8 @@ export default function FundReconPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showChart, setShowChart] = useState(true);
+  const [tab, setTab] = useState('visits');
+  const [missing, setMissing] = useState('');
 
   const rangeError = rangeErrorOf(range);
   const params = useMemo(() => ({
@@ -70,7 +75,11 @@ export default function FundReconPage() {
     fundCode: fundCode || undefined,
     fundStatus: fundStatus || undefined,
     search: search || undefined,
-  }), [range, pttype, fundCode, fundStatus, search]);
+    missing: missing || undefined,
+  }), [range, pttype, fundCode, fundStatus, search, missing]);
+
+  // พารามิเตอร์สำหรับแท็บวิเคราะห์ (ไม่ขึ้นกับตัวกรองรายละเอียด)
+  const analysisParams = useMemo(() => ({ ...range, fund: pttype || undefined }), [range, pttype]);
 
   const load = useCallback(async () => {
     if (rangeError) return;
@@ -161,10 +170,22 @@ export default function FundReconPage() {
         {rangeError && <div className="text-danger small mt-2">{rangeError}</div>}
       </div>
 
-      {data?.needsRepull && (
+      {data?.notPulledMonths?.length > 0 && (
         <div className="alert alert-warning d-flex align-items-center gap-2">
           <i className="bi bi-exclamation-triangle" />
-          มีการเพิ่มรายการในการตั้งค่ากองทุนหลังดึงข้อมูล HOSxP ครั้งล่าสุด กด “ดึงข้อมูล HOSxP ช่วงนี้” เพื่อให้ผลครบ
+          <span>
+            ยังไม่ได้ดึงข้อมูล HOSxP ของเดือน {data.notPulledMonths.map(thaiMonth).join(', ')}
+            {' '}visit ของเดือนเหล่านี้จะไม่แสดง กด “ดึงข้อมูล HOSxP ช่วงนี้”
+          </span>
+        </div>
+      )}
+      {data?.stalePulledMonths?.length > 0 && (
+        <div className="alert alert-warning d-flex align-items-center gap-2">
+          <i className="bi bi-exclamation-triangle" />
+          <span>
+            มีการเพิ่มรายการในกองทุนหลังดึงข้อมูลเดือน {data.stalePulledMonths.map(thaiMonth).join(', ')}
+            {' '}กด “ดึงข้อมูล HOSxP ช่วงนี้” เพื่อให้ผลครบ
+          </span>
         </div>
       )}
 
@@ -283,10 +304,33 @@ export default function FundReconPage() {
         <p className="small muted mb-0 mt-1">คนไข้รายเดือนนับไม่ซ้ำภายในเดือน ผลรวมทุกเดือนจึงอาจมากกว่าจำนวนคนไข้ทั้งช่วง</p>
       </div>
 
-      {/* ---------- รายละเอียด ---------- */}
+      {/* ---------- รายละเอียด / วิเคราะห์ ---------- */}
       <div className="panel">
-        <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
-          <span className="fw-medium me-1">รายละเอียด: {fundName}</span>
+        <div className="panel-tabs" role="tablist">
+          {[
+            ['visits', 'รายละเอียด visit'],
+            ['items', 'อัตราได้รับเงินรายรายการ'],
+            ['common', 'เทียบกับเคสที่ได้รับเงิน'],
+          ].map(([key, label]) => (
+            <button key={key} type="button" role="tab" aria-selected={tab === key}
+              className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
+              {label}
+            </button>
+          ))}
+          <span className="ms-auto align-self-center small muted">{fundName}</span>
+        </div>
+
+        {tab !== 'visits' && (
+          <FundItemAnalysis
+            mode={tab}
+            params={analysisParams}
+            fundCode={fundCode}
+            onShowMissing={() => { setMissing('common'); setFundStatus(''); setPage(1); setTab('visits'); }}
+          />
+        )}
+
+        {tab === 'visits' && (<>
+        <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
           <button type="button" className={`chip ${!fundStatus ? 'active' : ''}`} onClick={() => select(fundCode, '')}>ทุกสถานะ</button>
           {ALL_STATUSES.map((s) => (
             <button key={s} type="button" className={`chip ${fundStatus === s ? 'active' : ''}`} onClick={() => select(fundCode, s)}>
@@ -297,6 +341,15 @@ export default function FundReconPage() {
             <button type="button" className="btn btn-sm btn-link" onClick={() => select('', fundStatus)}>แสดงทุกกองทุน</button>
           )}
           {loading && <span className="spinner-border spinner-border-sm text-secondary ms-auto" role="status" />}
+        </div>
+        <div className="d-flex flex-wrap gap-2 align-items-center mb-3">
+          <span className="small muted me-1">ขาดรายการ:</span>
+          {[['', 'ไม่กรอง'], ['required', 'ขาดรายการจำเป็น'], ['common', 'ขาดเมื่อเทียบเคสที่ได้รับเงิน']].map(([v, label]) => (
+            <button key={v || 'none'} type="button" className={`chip ${missing === v ? 'active' : ''}`}
+              onClick={() => { setMissing(v); setPage(1); }}>
+              {label}
+            </button>
+          ))}
         </div>
 
         <div className="table-wrap">
@@ -310,17 +363,18 @@ export default function FundReconPage() {
                 <th>ผู้ป่วย</th>
                 <th>สิทธิ</th>
                 <th>รายการที่เข้าเกณฑ์ / เหตุผล</th>
+                <th>ขาดรายการ</th>
                 <th className="num">ยอดตั้งเบิก</th>
                 <th className="num">ยอดเบิกได้</th>
                 <th className="num">ผลต่าง</th>
-                <th>REP / TRAN_ID</th>
+                <th>REP / TRAN_ID / รอบ STM</th>
                 <th>รหัสข้อผิดพลาด</th>
               </tr>
             </thead>
             <tbody>
               {data?.rows.length === 0 && (
                 <tr>
-                  <td colSpan={12} className="text-center muted py-4">
+                  <td colSpan={13} className="text-center muted py-4">
                     {summary?.all.visits === 0 && summary?.all.extraCount === 0
                       ? 'ยังไม่มี visit ที่เข้าเกณฑ์ ตรวจว่าตั้งค่ารายการในกองทุนแล้ว และดึงข้อมูล HOSxP ของช่วงนี้แล้ว'
                       : 'ไม่พบรายการที่ตรงกับเงื่อนไข'}
@@ -336,12 +390,21 @@ export default function FundReconPage() {
                   <td className="wrap">{r.patient_name || '–'}<div className="small-id">{r.cid}</div></td>
                   <td>{r.pttype_name || '–'}{r.pttype && <div className="small-id">{r.pttype}</div>}</td>
                   <td className={`wrap ${r.fund_status === 'EXTRA_PAID' ? 'text-primary-emphasis' : ''}`}>{r.items}</td>
+                  <td className="wrap missing-list">
+                    {r.missing_required && <div><span className="tag text-danger">จำเป็น:</span> {r.missing_required}</div>}
+                    {r.missing_common && <div><span className="tag text-warning-emphasis">เคสได้รับเงินมักมี:</span> {r.missing_common}</div>}
+                    {!r.missing_required && !r.missing_common && <span className="muted">–</span>}
+                  </td>
                   <td className="num">{money(r.his_fund_amount)}</td>
                   <td className="num">{money(r.stm_fund_amount)}</td>
                   <td className="num">
                     <Diff value={r.stm_fund_amount === null || r.his_fund_amount === null ? null : r.stm_fund_amount - r.his_fund_amount} />
                   </td>
-                  <td>{r.rep_no || '–'}<div className="small-id">{r.tran_id}</div></td>
+                  <td>
+                    {r.rep_no || '–'}
+                    <div className="small-id">{r.tran_id}</div>
+                    {r.stm_docs && <div className="small-id">{r.stm_docs}</div>}
+                  </td>
                   <td>{r.error_code ? <span className="text-danger">{r.error_code}</span> : '–'}</td>
                 </tr>
               ))}
@@ -357,6 +420,7 @@ export default function FundReconPage() {
             <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onChange={setPage} />
           </div>
         )}
+        </>)}
       </div>
     </>
   );

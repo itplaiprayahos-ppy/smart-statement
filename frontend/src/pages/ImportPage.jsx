@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import {
   confirmAction, notifySuccess, showError, showInfo, showSuccess, withLoading,
 } from '../utils/alert.js';
-import { int, money, thaiDate, thaiDateTime } from '../utils/format.js';
+import { int, money, thaiDate, thaiDateTime, thaiMonth } from '../utils/format.js';
 
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -15,6 +15,16 @@ function errorListHtml(errors, more = 0) {
   return `<div style="max-height:320px;overflow:auto;text-align:left;font-size:.85rem">
     <table class="table table-sm"><thead><tr><th class="pe-3">แถว</th><th>ปัญหา</th></tr></thead><tbody>${rows}</tbody></table>
     ${more > 0 ? `<div class="text-muted">และอีก ${more} แถว</div>` : ''}</div>`;
+}
+
+/** [15,16,17,20] -> "15–17, 20" */
+function rowRanges(nums) {
+  const out = [];
+  nums.forEach((n) => {
+    const last = out[out.length - 1];
+    if (last && n === last[1] + 1) last[1] = n; else out.push([n, n]);
+  });
+  return out.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(', ');
 }
 
 export default function ImportPage() {
@@ -168,10 +178,23 @@ export default function ImportPage() {
         <div className="panel">
           <div className="panel-title">ผลการตรวจไฟล์ {preview.fileName}</div>
           <p className="muted mb-3">
+            {preview.stmDoc
+              ? <>รอบ STM <strong>{preview.stmDoc}</strong>{preview.stmPeriod && ` (${thaiMonth(preview.stmPeriod.slice(0, 7))})`}, </>
+              : <span className="text-warning-emphasis">ไม่พบเลขที่เอกสาร STM (รายการจะไม่แยกตามรอบ), </span>}
             ชีต “{preview.sheetName}” หัวตารางอยู่แถวที่ {preview.headerRowNumber}:
             พบ {int(preview.totalRows)} แถว นำเข้าได้ {int(preview.validRows)} แถว
             {preview.errorCount > 0 && <>, <span className="text-danger">มีปัญหา {int(preview.errorCount)} แถว</span></>}
           </p>
+
+          {preview.skipped?.count > 0 && (
+            <div className="alert alert-light border small py-2">
+              <i className="bi bi-info-circle me-1" />
+              ข้ามแถวที่ไม่ใช่ข้อมูลคนไข้ {int(preview.skipped.count)} แถว (แถวที่ {rowRanges(preview.skipped.rows)}
+              {preview.skipped.count > preview.skipped.rows.length ? ' …' : ''})
+              {preview.skipped.endedAtRow && <> ตารางข้อมูลจบที่แถว {preview.skipped.endedAtRow}</>}
+              {' '}เช่น แถวรวมยอดหรือส่วนท้ายรายงาน ถ้ามีข้อมูลคนไข้อยู่ในแถวเหล่านี้ แจ้งผู้ดูแลระบบ
+            </div>
+          )}
 
           {preview.headers?.length > 0 && (
             <details className="mb-3">
@@ -264,7 +287,7 @@ export default function ImportPage() {
             <table className="table table-hover data-table">
               <thead>
                 <tr>
-                  <th>เวลา</th><th>ไฟล์</th><th>ช่วงวันที่ในไฟล์</th>
+                  <th>เวลา</th><th>ไฟล์</th><th>รอบ STM</th><th>ช่วงวันที่ในไฟล์</th>
                   <th className="num">เพิ่มใหม่</th><th className="num">อัปเดต</th><th className="num">ข้าม</th>
                   <th>ผู้นำเข้า</th><th />
                 </tr>
@@ -274,6 +297,9 @@ export default function ImportPage() {
                   <tr key={b.id}>
                     <td className="text-nowrap">{thaiDateTime(b.created_at)}</td>
                     <td>{b.file_name}<div className="small-id">{b.mapping_name}</div></td>
+                    <td>{b.stm_doc || <span className="muted">–</span>}
+                      {b.stm_period && <div className="small-id">{thaiMonth(b.stm_period.slice(0, 7))}</div>}
+                    </td>
                     <td className="text-nowrap">{b.date_min ? `${thaiDate(b.date_min)} – ${thaiDate(b.date_max)}` : <span className="muted">ถูกแทนที่ด้วยไฟล์ใหม่กว่า</span>}</td>
                     <td className="num">{int(b.inserted_rows)}</td>
                     <td className="num">{int(b.updated_rows)}</td>

@@ -122,10 +122,24 @@ async function main() {
   extra[COL.HC] = 400; extra[COL.TOTAL] = 400;
   aoa.push(extra);
 
+  // ส่วนท้ายรายงานแบบไฟล์จริง: แถวรวมยอด, แถวว่าง และตารางสรุปที่มีข้อความในคอลัมน์ A
+  const dataEnd = aoa.length;
+  const totalRow = Array(WIDTH).fill(null);
+  totalRow[6] = 'รวม';
+  totalRow[COL.TOTAL] = aoa.slice(HEAD + 3).reduce((a, r) => a + (Number(r[COL.TOTAL]) || 0), 0);
+  aoa.push(totalRow, [], [], [], [], []);
+  aoa.push(['สรุปการจ่ายชดเชย']);
+  ['OP', 'IP', 'HC', 'AE', 'INST', 'DMIS', 'PP', 'FS'].forEach((g, k) => {
+    const r = Array(WIDTH).fill(null);
+    r[0] = g; r[1] = 'จำนวนราย'; r[2] = 10 + k; r[5] = 1000 * (k + 1); r[7] = '01/08/2569';
+    aoa.push(r);
+  });
+  aoa.push(['หมายเหตุ: ข้อมูลตัวอย่าง'], ['ผู้จัดทำรายงาน ...........']);
+
   const ws = XLSX.utils.aoa_to_sheet(aoa);
   ws['!merges'] = merges();
   aoa.forEach((row, r) => {
-    if (r <= HEAD + 2) return;
+    if (r <= HEAD + 2 || r >= dataEnd) return;
     [7, 8].forEach((c) => {
       const cell = ws[XLSX.utils.encode_cell({ r, c })];
       if (cell && cell.t === 'n') cell.z = 'dd/mm/yyyy';
@@ -134,7 +148,7 @@ async function main() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'รายละเอียด(ข้อมูลปกติ) 1 OP');
   XLSX.writeFile(wb, out);
-  console.log(`✔ สร้าง ${out} (${aoa.length - HEAD - 3} แถว)`);
+  console.log(`✔ สร้าง ${out} (${dataEnd - HEAD - 3} แถวข้อมูล + ส่วนท้ายรายงาน)`);
   await hosxp.end();
 }
 

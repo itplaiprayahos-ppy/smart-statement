@@ -40,9 +40,12 @@ function requireFile(req) {
 router.post('/preview', upload.single('file'), asyncHandler(async (req, res) => {
   requireFile(req);
   const profile = await loadProfile(req.body.mappingId);
-  const parsed = parseExcel(req.file.buffer, profile, await loadFunds());
+  const fileName = fileNameOf(req.file);
+  const parsed = parseExcel(req.file.buffer, profile, await loadFunds(), fileName);
   res.json({
-    fileName: fileNameOf(req.file),
+    fileName,
+    stmDoc: parsed.stmDoc,
+    stmPeriod: parsed.stmPeriod,
     sheetName: parsed.sheetName,
     sheetNames: parsed.sheetNames,
     headerRowNumber: parsed.headerRowNumber,
@@ -55,6 +58,7 @@ router.post('/preview', upload.single('file'), asyncHandler(async (req, res) => 
     validRows: parsed.records.length,
     errorCount: parsed.errorCount,
     errors: parsed.errors.slice(0, 50),
+    skipped: parsed.skipped,
     sample: parsed.records.slice(0, 10).map(({ raw, line_key, ...r }) => r),
   });
 }));
@@ -63,13 +67,13 @@ router.post('/preview', upload.single('file'), asyncHandler(async (req, res) => 
 router.post('/', upload.single('file'), asyncHandler(async (req, res) => {
   requireFile(req);
   const profile = await loadProfile(req.body.mappingId);
-  const parsed = parseExcel(req.file.buffer, profile, await loadFunds());
+  const fileName = fileNameOf(req.file);
+  const parsed = parseExcel(req.file.buffer, profile, await loadFunds(), fileName);
   if (parsed.missingRequired.length) {
     throw new HttpError(400, `ไฟล์ขาดคอลัมน์ที่จำเป็น: ${parsed.missingRequired.join(', ')}`);
   }
   if (!parsed.records.length) throw new HttpError(400, 'ไม่พบรายการที่นำเข้าได้ในไฟล์');
 
-  const fileName = fileNameOf(req.file);
   const result = await saveImport({ fileName, profile, parsed, userId: req.user.id });
   await audit(req, 'import', { fileName, batchId: result.batchId, rows: parsed.records.length });
   res.status(201).json(result);
@@ -78,7 +82,7 @@ router.post('/', upload.single('file'), asyncHandler(async (req, res) => {
 router.get('/', asyncHandler(async (req, res) => {
   const { rows } = await db.query(
     `SELECT b.id, b.file_name, b.claim_type, b.total_rows, b.inserted_rows, b.updated_rows,
-            b.error_rows, b.created_at, m.name AS mapping_name, u.username AS imported_by,
+            b.error_rows, b.created_at, b.stm_doc, b.stm_period, m.name AS mapping_name, u.username AS imported_by,
             (SELECT COUNT(*)::int FROM nhso_lines l WHERE l.batch_id = b.id) AS current_rows,
             (SELECT MIN(service_date) FROM nhso_lines l WHERE l.batch_id = b.id) AS date_min,
             (SELECT MAX(service_date) FROM nhso_lines l WHERE l.batch_id = b.id) AS date_max

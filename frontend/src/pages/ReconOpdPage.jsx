@@ -264,7 +264,11 @@ export default function ReconOpdPage() {
                   <td className="num">{money(r.claim_amount)}</td>
                   <td className="num">{money(r.compensated)}</td>
                   <td className="num"><Diff value={r.diff} /></td>
-                  <td>{r.rep_no || '–'}<div className="small-id">{r.tran_id}</div></td>
+                  <td>
+                    {r.rep_no || '–'}
+                    {r.line_count > 1 && <span className="badge text-bg-light border ms-1" title={r.stm_docs}>{r.line_count} รอบ</span>}
+                    <div className="small-id">{r.tran_id}</div>
+                  </td>
                   <td>{r.error_code ? <span className="text-danger">{r.error_code}</span> : '–'}</td>
                 </tr>
               ))}

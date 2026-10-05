@@ -1,7 +1,7 @@
 import { withTransaction } from '../config/db.js';
 
 const COLS = ['batch_id', 'claim_type', 'line_key', 'rep_no', 'tran_id', 'hn', 'an', 'pid',
-  'patient_name', 'service_date', 'fund', 'claim_amount', 'compensated', 'error_code', 'fund_amounts', 'raw'];
+  'patient_name', 'service_date', 'fund', 'claim_amount', 'compensated', 'error_code', 'fund_amounts', 'stm_doc', 'stm_period', 'raw'];
 const CHUNK = 500;
 
 /**
@@ -11,10 +11,11 @@ const CHUNK = 500;
 export async function saveImport({ fileName, profile, parsed, userId }) {
   return withTransaction(async (client) => {
     const { rows: [batch] } = await client.query(
-      `INSERT INTO import_batches (file_name, claim_type, mapping_id, total_rows, error_rows, errors, imported_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      `INSERT INTO import_batches (file_name, claim_type, mapping_id, total_rows, error_rows, errors, imported_by,
+         stm_doc, stm_period)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
       [fileName, profile.claim_type, profile.id, parsed.totalRows, parsed.errorCount,
-        JSON.stringify(parsed.errors), userId],
+        JSON.stringify(parsed.errors), userId, parsed.stmDoc, parsed.stmPeriod],
     );
 
     let inserted = 0;

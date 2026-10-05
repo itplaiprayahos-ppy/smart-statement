@@ -202,3 +202,22 @@ body { font-size: 0.95rem; line-height: 1.6; }
 .chip.active { background: var(--cr-primary); border-color: var(--cr-primary); color: #fff; }
 .fund-list .list-group-item.active { background: #eef5f4; color: var(--cr-ink); border-color: var(--cr-line); box-shadow: inset 4px 0 0 var(--cr-primary); }
 .item-results { max-height: 320px; overflow-y: auto; }
+
+/* กล่องสูงคงที่ เลื่อนดูข้อมูลภายใน (หน้าตั้งค่ากองทุน) */
+.scroll-box {
+  height: 280px; overflow: auto; border: 1px solid var(--cr-line); border-radius: 0.45rem; background: #fff;
+}
+.scroll-box .data-table { margin: 0; }
+.scroll-box thead th { position: sticky; top: 0; z-index: 1; }
+.scroll-box .empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--cr-muted); padding: 1rem; text-align: center; }
+
+/* แท็บในแผงรายละเอียด */
+.panel-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--cr-line); margin: -0.25rem 0 1rem; flex-wrap: wrap; }
+.panel-tabs button {
+  border: 0; background: none; padding: 0.5rem 0.9rem; color: var(--cr-muted); border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.panel-tabs button.active { color: var(--cr-primary); border-bottom-color: var(--cr-primary); font-weight: 600; }
+.rate-bar { display: inline-block; width: 70px; height: 6px; border-radius: 3px; background: var(--cr-line); vertical-align: middle; margin-right: 0.4rem; overflow: hidden; }
+.rate-bar span { display: block; height: 100%; background: var(--st-matched); }
+.missing-list { font-size: 0.8rem; line-height: 1.4; }
+.missing-list .tag { font-weight: 600; }

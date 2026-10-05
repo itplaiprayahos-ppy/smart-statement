@@ -42,8 +42,9 @@ function PttypePicker({ list, error, value, onChange }) {
           ล้าง
         </button>
       </div>
-      <div className="item-results border rounded">
-        <table className="table table-sm table-hover data-table mb-0">
+      <div className="scroll-box">
+        <table className="table table-sm table-hover data-table">
+          <thead><tr><th /><th>รหัส</th><th>ชื่อสิทธิ</th><th>กลุ่ม</th></tr></thead>
           <tbody>
             {shown.map((p) => (
               <tr key={p.pttype} onClick={() => toggle(p.pttype)} style={{ cursor: 'pointer' }}>
@@ -56,7 +57,7 @@ function PttypePicker({ list, error, value, onChange }) {
                 <td className="small-id">{p.hipdata_code}</td>
               </tr>
             ))}
-            {shown.length === 0 && <tr><td className="muted text-center py-3">ไม่พบสิทธิ</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={4} className="muted text-center py-3">ไม่พบสิทธิ</td></tr>}
           </tbody>
         </table>
       </div>
@@ -113,7 +114,7 @@ export default function FundSettingsPage() {
     setSearching(true);
     try {
       const { data } = await api.get('/funds/items/search', { params: { source, q: q.trim() } });
-      setResults(data);
+      setResults(data); // { items, limited }
     } catch (err) {
       showError(err, 'ค้นหาไม่สำเร็จ');
     } finally {
@@ -121,8 +122,17 @@ export default function FundSettingsPage() {
     }
   };
 
-  const addItem = (it) => update({ items: [...form.items, { icode: it.icode, item_name: it.name, source: it.source }] });
+  const addItem = (it) => update({ items: [...form.items, { icode: it.icode, item_name: it.name, source: it.source, required: false }] });
+  const addAll = () => {
+    const have = new Set(form.items.map((x) => x.icode));
+    const fresh = results.items.filter((it) => !have.has(it.icode))
+      .map((it) => ({ icode: it.icode, item_name: it.name, source: it.source, required: false }));
+    update({ items: [...form.items, ...fresh] });
+  };
   const removeItem = (icode) => update({ items: form.items.filter((x) => x.icode !== icode) });
+  const toggleRequired = (icode) => update({
+    items: form.items.map((x) => (x.icode === icode ? { ...x, required: !x.required } : x)),
+  });
 
   const save = async () => {
     const body = {
@@ -238,19 +248,32 @@ export default function FundSettingsPage() {
               <PttypePicker list={pttypeList} error={pttypeError} value={form.pttypes} onChange={(pttypes) => update({ pttypes })} />
 
               <div className="panel">
-                <div className="panel-title">รายการที่เข้าเงื่อนไข ({form.items.length})</div>
-                {form.items.length === 0 ? (
-                  <p className="muted">ยังไม่มีรายการ ค้นหาจาก HOSxP ด้านล่างแล้วกด “เพิ่ม”</p>
-                ) : (
-                  <div className="table-wrap mb-3">
+                <div className="panel-title mb-1">
+                  รายการที่เข้าเงื่อนไข ({form.items.length})
+                  {form.items.some((x) => x.required) && (
+                    <span className="small muted fw-normal"> รายการจำเป็น {form.items.filter((x) => x.required).length}</span>
+                  )}
+                </div>
+                <p className="small muted">
+                  visit ที่มีรายการใดรายการหนึ่งจะเข้าเกณฑ์กองทุน ติ๊ก “จำเป็น” ที่รายการที่ต้องเบิกคู่กันเสมอ
+                  ระบบจะแจ้งว่า visit ที่เคลมไม่สำเร็จขาดรายการจำเป็นตัวไหน
+                </p>
+                <div className="scroll-box mb-3">
+                  {form.items.length === 0 ? (
+                    <div className="empty">ยังไม่มีรายการ ค้นหาจาก HOSxP ด้านล่างแล้วกด “เพิ่ม”</div>
+                  ) : (
                     <table className="table table-sm data-table">
-                      <thead><tr><th>icode</th><th>ชื่อรายการ</th><th>ประเภท</th><th /></tr></thead>
+                      <thead><tr><th>icode</th><th>ชื่อรายการ</th><th>ประเภท</th><th className="text-center">จำเป็น</th><th /></tr></thead>
                       <tbody>
                         {form.items.map((it) => (
                           <tr key={it.icode}>
                             <td>{it.icode}</td>
                             <td className="wrap">{it.item_name}</td>
                             <td>{SOURCE_LABEL[it.source]}</td>
+                            <td className="text-center">
+                              <input type="checkbox" className="form-check-input" checked={!!it.required}
+                                onChange={() => toggleRequired(it.icode)} aria-label={`รายการจำเป็น ${it.item_name}`} />
+                            </td>
                             <td className="text-end">
                               <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => removeItem(it.icode)} title="นำออก">
                                 <i className="bi bi-x-lg" /><span className="visually-hidden">นำออก</span>
@@ -260,8 +283,8 @@ export default function FundSettingsPage() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <form className="row g-2 align-items-end" onSubmit={search}>
                   <div className="col-sm-4">
@@ -282,28 +305,42 @@ export default function FundSettingsPage() {
                   </div>
                 </form>
 
-                {results && (
-                  <div className="item-results mt-3">
-                    {results.length === 0 ? <p className="muted mb-0">ไม่พบรายการ</p> : (
-                      <table className="table table-sm table-hover data-table">
-                        <tbody>
-                          {results.map((it) => (
-                            <tr key={it.icode}>
-                              <td>{it.icode}</td>
-                              <td className="wrap">{it.name}</td>
-                              <td className="num">{it.price !== null && it.price !== undefined ? money(it.price) : ''}</td>
-                              <td className="text-end">
-                                <button type="button" className="btn btn-sm btn-outline-primary" disabled={added.has(it.icode)} onClick={() => addItem(it)}>
-                                  {added.has(it.icode) ? 'เพิ่มแล้ว' : 'เพิ่ม'}
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                )}
+                <div className="d-flex justify-content-between align-items-center mt-3 mb-2">
+                  <span className="small muted">
+                    {results
+                      ? `พบ ${results.items.length.toLocaleString('th-TH')} รายการ${results.limited ? ' (แสดงสูงสุด 2,000 รายการ ระบุคำค้นให้แคบลง)' : ''}`
+                      : 'ผลการค้นหาจะแสดงที่นี่'}
+                  </span>
+                  {results?.items.length > 0 && (
+                    <button type="button" className="btn btn-sm btn-outline-primary" onClick={addAll}
+                      disabled={results.items.every((it) => added.has(it.icode))}>
+                      เพิ่มทั้งหมดที่พบ
+                    </button>
+                  )}
+                </div>
+                <div className="scroll-box">
+                  {!results || results.items.length === 0 ? (
+                    <div className="empty">{results ? 'ไม่พบรายการ' : 'พิมพ์ icode หรือชื่อรายการ แล้วกดค้นหา'}</div>
+                  ) : (
+                    <table className="table table-sm table-hover data-table">
+                      <thead><tr><th>icode</th><th>ชื่อรายการ</th><th className="num">ราคา</th><th /></tr></thead>
+                      <tbody>
+                        {results.items.map((it) => (
+                          <tr key={it.icode}>
+                            <td>{it.icode}</td>
+                            <td className="wrap">{it.name}</td>
+                            <td className="num">{it.price !== null && it.price !== undefined ? money(it.price) : ''}</td>
+                            <td className="text-end">
+                              <button type="button" className="btn btn-sm btn-outline-primary" disabled={added.has(it.icode)} onClick={() => addItem(it)}>
+                                {added.has(it.icode) ? 'เพิ่มแล้ว' : 'เพิ่ม'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
               </div>
 
               <div className="d-flex justify-content-between align-items-center">

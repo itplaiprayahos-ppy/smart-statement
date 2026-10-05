@@ -18,18 +18,65 @@ const COMPARE_COLUMNS = { claim: 'j.claim_amount', compensated: 'j.compensated' 
 export function baseCte(compare) {
   const cmp = COMPARE_COLUMNS[compare] || COMPARE_COLUMNS.claim;
   return `
-  -- ผู้ป่วยมาหลายครั้งในวันเดียว: จับคู่แบบ 1:1 ตามลำดับยอดเงิน (rk) แล้วแจ้งให้ตรวจสอบ
-  WITH h AS (
+  -- คีย์จับคู่ของ visit: เลขบัตรประชาชน ถ้าไม่มี/ไม่ครบ 13 หลัก ใช้ HN (ตัด 0 หน้า) แทน
+  WITH hv AS MATERIALIZED (
     SELECT v.*,
-           ROW_NUMBER() OVER (PARTITION BY cid, vstdate ORDER BY uc_money, vn) AS rk,
-           COUNT(*)     OVER (PARTITION BY cid, vstdate) AS grp_n
-    FROM his_opd_visits v WHERE vstdate BETWEEN $1 AND $2
+           CASE WHEN v.cid ~ '^[0-9]{13}$' THEN v.cid ELSE 'HN:' || ltrim(v.hn, '0') END AS mkey
+    FROM his_opd_visits v WHERE v.vstdate BETWEEN $1 AND $2
+  ),
+  hcount AS (SELECT mkey, vstdate, COUNT(*)::int AS c FROM hv GROUP BY mkey, vstdate),
+  -- ผู้ป่วยมาหลายครั้งในวันเดียว: จับคู่แบบ 1:1 ตามลำดับยอดเงิน (rk) แล้วแจ้งให้ตรวจสอบ
+  h AS (
+    SELECT hv.*,
+           ROW_NUMBER() OVER (PARTITION BY mkey, vstdate ORDER BY uc_money, vn) AS rk,
+           COUNT(*)     OVER (PARTITION BY mkey, vstdate) AS grp_n
+    FROM hv
+  ),
+  -- รายการจาก Statement: หาคีย์ที่ตรงกับ HOSxP (เลขบัตรก่อน แล้วค่อย HN)
+  nl AS (
+    SELECT l.*,
+           CASE WHEN c1.c IS NOT NULL THEN l.pid WHEN c2.c IS NOT NULL THEN c2.mkey ELSE l.pid END AS mkey,
+           COALESCE(c1.c, c2.c, 0) AS his_n
+    FROM nhso_lines l
+    LEFT JOIN hcount c1 ON c1.mkey = l.pid AND c1.vstdate = l.service_date
+    LEFT JOIN hcount c2 ON c2.mkey = 'HN:' || ltrim(l.hn, '0') AND c2.vstdate = l.service_date
+    WHERE l.claim_type = 'OPD' AND l.service_date BETWEEN $1 AND $2
+  ),
+  -- รวมรายการหลายรอบ STM เป็นรายการเบิกเดียว
+  --   คนไข้มี visit เดียวในวันนั้น -> รวมทุกรายการของวันนั้น (รวมกรณีส่งใหม่ได้ TRAN_ID ใหม่)
+  --   มีหลาย visit หรือไม่พบใน HOSxP -> รวมเฉพาะ TRAN_ID เดียวกันข้ามรอบ
+  nk AS (
+    SELECT nl.*,
+           CASE WHEN his_n = 1 THEN 'V:' || mkey || ':' || service_date
+                ELSE 'T:' || COALESCE(tran_id, id::text) END AS gk
+    FROM nl
+  ),
+  fa AS (
+    SELECT s.gk, jsonb_object_agg(s.key, s.total) AS fund_amounts
+    FROM (SELECT nk.gk, e.key, SUM(e.value::numeric) AS total
+          FROM nk CROSS JOIN LATERAL jsonb_each_text(nk.fund_amounts) AS e
+          GROUP BY nk.gk, e.key) s
+    GROUP BY s.gk
+  ),
+  ng AS (
+    SELECT nk.gk, MIN(nk.id) AS id, MAX(nk.mkey) AS mkey, MAX(nk.pid) AS pid,
+           MAX(nk.service_date) AS service_date, MAX(nk.hn) AS hn,
+           MAX(nk.patient_name) AS patient_name, MAX(nk.fund) AS fund,
+           string_agg(DISTINCT nk.rep_no, ', ') AS rep_no,
+           string_agg(DISTINCT nk.tran_id, ', ') AS tran_id,
+           string_agg(DISTINCT nk.stm_doc, ', ') AS stm_docs,
+           COUNT(*)::int AS line_count,
+           MAX(nk.claim_amount) AS claim_amount,          -- ส่งซ้ำไม่นับยอดเรียกเก็บซ้ำ
+           SUM(nk.compensated) AS compensated,             -- ยอดชดเชยและยอดปรับปรุงทุกรอบรวมกัน
+           -- รหัสข้อผิดพลาดใช้ของรอบล่าสุด (ถ้ารอบหลังผ่านแล้ว ไม่ถือว่าถูกปฏิเสธ)
+           (array_agg(nk.error_code ORDER BY nk.stm_period DESC NULLS LAST, nk.id DESC))[1] AS error_code
+    FROM nk GROUP BY nk.gk
   ),
   n AS (
-    SELECT l.*,
-           ROW_NUMBER() OVER (PARTITION BY pid, service_date ORDER BY claim_amount, id) AS rk,
-           COUNT(*)     OVER (PARTITION BY pid, service_date) AS grp_n
-    FROM nhso_lines l WHERE claim_type = 'OPD' AND service_date BETWEEN $1 AND $2
+    SELECT ng.*, COALESCE(fa.fund_amounts, '{}'::jsonb) AS fund_amounts,
+           ROW_NUMBER() OVER (PARTITION BY ng.mkey, ng.service_date ORDER BY ng.claim_amount, ng.id) AS rk,
+           COUNT(*)     OVER (PARTITION BY ng.mkey, ng.service_date) AS grp_n
+    FROM ng LEFT JOIN fa ON fa.gk = ng.gk
   ),
   j AS (
     SELECT h.vn, h.hn, h.cid, h.vstdate, h.pttype, h.pttype_name, h.hipdata_code, h.pdx,
@@ -37,9 +84,10 @@ export function baseCte(compare) {
            n.id AS line_id, n.rep_no, n.tran_id, n.hn AS nhso_hn, n.pid,
            COALESCE(n.patient_name, h.ptname) AS patient_name,
            n.service_date, n.fund, n.claim_amount, n.compensated, n.error_code,
+           n.fund_amounts, n.stm_docs, n.line_count,
            GREATEST(COALESCE(h.grp_n, 0), COALESCE(n.grp_n, 0)) AS grp_n
     FROM h
-    FULL OUTER JOIN n ON n.pid = h.cid AND n.service_date = h.vstdate AND n.rk = h.rk
+    FULL OUTER JOIN n ON n.mkey = h.mkey AND n.service_date = h.vstdate AND n.rk = h.rk
   ),
   r AS (
     SELECT j.*,
@@ -69,7 +117,7 @@ function filterSql(firstParam) {
       AND (${q}::text IS NULL
            OR r.hn = ${q} OR r.nhso_hn = ${q} OR r.vn = ${q}
            OR r.cid LIKE ${q} || '%' OR r.pid LIKE ${q} || '%'
-           OR r.tran_id = ${q} OR r.rep_no = ${q}
+           OR r.tran_id LIKE '%' || ${q} || '%' OR r.rep_no LIKE '%' || ${q} || '%'
            OR r.patient_name ILIKE '%' || ${q} || '%')`;
 }
 
@@ -77,49 +125,51 @@ export function baseParams(o) {
   return [o.dateFrom, o.dateTo, o.fund || null, o.onlyClaimable !== false];
 }
 
+/** คำนวณผลจับคู่ครั้งเดียวลงตารางชั่วคราว ro แล้วให้ทุกคำสั่งอ่านจากตารางนี้ */
+async function withReconTable(opts, fn) {
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`CREATE TEMP TABLE ro ON COMMIT DROP AS ${baseCte(opts.compare)} SELECT * FROM r`, baseParams(opts));
+    await client.query('ANALYZE ro');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function reconcileOpd(opts) {
-  const cte = baseCte(opts.compare);
-  const params = baseParams(opts);
-
-  const summarySql = `${cte}
-    SELECT status, COUNT(*)::int AS count,
-           COALESCE(SUM(uc_money), 0)     AS his_amount,
-           COALESCE(SUM(claim_amount), 0) AS claim_amount,
-           COALESCE(SUM(compensated), 0)  AS compensated
-    FROM r GROUP BY status`;
-
-  const listParams = [...params, opts.status || null, opts.search?.trim() || null];
-  const where = filterSql(5);
-  const countSql = `${cte} SELECT COUNT(*)::int AS total FROM r ${where}`;
-  const rowsSql = `${cte}
-    SELECT vn, hn, cid, vstdate, pttype, pttype_name, hipdata_code, pdx, income, uc_money,
-           line_id, rep_no, tran_id, nhso_hn, pid, patient_name, service_date, fund,
-           claim_amount, compensated, error_code, sdate, diff, status
-    FROM r ${where}
-    ORDER BY sdate, COALESCE(hn, nhso_hn), vn NULLS LAST
-    LIMIT $7 OFFSET $8`;
-
   const pageSize = Math.min(Math.max(Number(opts.pageSize) || 50, 10), 500);
   const page = Math.max(Number(opts.page) || 1, 1);
+  const fp = [opts.status || null, opts.search?.trim() || null];
 
-  const [summary, count, rows] = await Promise.all([
-    db.query(summarySql, params),
-    db.query(countSql, listParams),
-    db.query(rowsSql, [...listParams, pageSize, (page - 1) * pageSize]),
-  ]);
+  return withReconTable(opts, async (c) => {
+    const summary = await c.query(`
+      SELECT status, COUNT(*)::int AS count,
+             COALESCE(SUM(uc_money), 0)     AS his_amount,
+             COALESCE(SUM(claim_amount), 0) AS claim_amount,
+             COALESCE(SUM(compensated), 0)  AS compensated
+      FROM ro GROUP BY status`);
+    const count = await c.query(`SELECT COUNT(*)::int AS total FROM ro r ${filterSql(1)}`, fp);
+    const rows = await c.query(`
+      SELECT vn, hn, cid, vstdate, pttype, pttype_name, hipdata_code, pdx, income, uc_money,
+             line_id, rep_no, tran_id, nhso_hn, pid, patient_name, service_date, fund,
+             claim_amount, compensated, error_code, stm_docs, line_count, sdate, diff, status
+      FROM ro r ${filterSql(1)}
+      ORDER BY sdate, COALESCE(hn, nhso_hn), vn NULLS LAST
+      LIMIT $3 OFFSET $4`, [...fp, pageSize, (page - 1) * pageSize]);
 
-  const byStatus = Object.fromEntries(STATUSES.map((s) => [s, {
-    count: 0, his_amount: 0, claim_amount: 0, compensated: 0,
-  }]));
-  summary.rows.forEach((r) => { byStatus[r.status] = r; });
-
-  return {
-    summary: byStatus,
-    total: count.rows[0].total,
-    page,
-    pageSize,
-    rows: rows.rows,
-  };
+    const byStatus = Object.fromEntries(STATUSES.map((st) => [st, {
+      count: 0, his_amount: 0, claim_amount: 0, compensated: 0,
+    }]));
+    summary.rows.forEach((r) => { byStatus[r.status] = r; });
+    return { summary: byStatus, total: count.rows[0].total, page, pageSize, rows: rows.rows };
+  });
 }
 
 const STATUS_TH = {
@@ -136,12 +186,11 @@ const EXPORT_LIMIT = 300_000;
 
 /** ส่งออกผลการเปรียบเทียบเป็นไฟล์ Excel */
 export async function exportOpd(opts) {
-  const cte = baseCte(opts.compare);
-  const { rows } = await db.query(
-    `${cte} SELECT * FROM r ${filterSql(5)}
+  const rows = await withReconTable(opts, async (c) => (await c.query(
+    `SELECT * FROM ro r ${filterSql(1)}
      ORDER BY sdate, COALESCE(hn, nhso_hn), vn NULLS LAST LIMIT ${EXPORT_LIMIT}`,
-    [...baseParams(opts), opts.status || null, opts.search?.trim() || null],
-  );
+    [opts.status || null, opts.search?.trim() || null],
+  )).rows);
 
   const data = rows.map((r) => ({
     'สถานะ': STATUS_TH[r.status],
@@ -157,6 +206,7 @@ export async function exportOpd(opts) {
     'ยอดเรียกเก็บ (HOSxP)': r.uc_money,
     'REP No.': r.rep_no,
     'TRAN_ID': r.tran_id,
+    'รอบ STM': r.stm_docs,
     'ยอดเรียกเก็บ (สปสช.)': r.claim_amount,
     'ยอดชดเชย': r.compensated,
     'ผลต่าง': r.diff,

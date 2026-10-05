@@ -41,7 +41,7 @@ router.get('/:code', asyncHandler(async (req, res) => {
   const { rows: [fund] } = await db.query('SELECT * FROM funds WHERE code = $1', [req.params.code]);
   if (!fund) throw new HttpError(404, 'ไม่พบกองทุน');
   const { rows: items } = await db.query(
-    'SELECT icode, item_name, source, created_at FROM fund_items WHERE fund_code = $1 ORDER BY source, item_name',
+    'SELECT icode, item_name, source, required, created_at FROM fund_items WHERE fund_code = $1 ORDER BY source, item_name',
     [fund.code],
   );
   res.json({ ...fund, items });
@@ -58,6 +58,7 @@ function readFund(body = {}) {
     icode: String(it.icode || '').trim(),
     item_name: it.item_name ? String(it.item_name).slice(0, 300) : null,
     source: it.source === 'drug' ? 'drug' : 'nondrug',
+    required: it.required === true,
   })).filter((it) => it.icode);
   const pttypes = [...new Set((Array.isArray(body.pttypes) ? body.pttypes : [])
     .map((p) => String(p).trim()).filter(Boolean))];
@@ -91,9 +92,10 @@ async function saveFund(req, res, originalCode) {
     await client.query('DELETE FROM fund_items WHERE fund_code = $1 AND NOT (icode = ANY($2::text[]))', [f.code, keep]);
     for (const it of f.items) {
       await client.query(
-        `INSERT INTO fund_items (fund_code, icode, item_name, source) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (fund_code, icode) DO UPDATE SET item_name = EXCLUDED.item_name, source = EXCLUDED.source`,
-        [f.code, it.icode, it.item_name, it.source],
+        `INSERT INTO fund_items (fund_code, icode, item_name, source, required) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (fund_code, icode) DO UPDATE SET item_name = EXCLUDED.item_name, source = EXCLUDED.source,
+           required = EXCLUDED.required`,
+        [f.code, it.icode, it.item_name, it.source, it.required],
       );
     }
     return f;
