@@ -1,0 +1,204 @@
+/* =========================================================
+   โทนสี: เขียวหัวเป็ดเข้ม (งานโรงพยาบาล) + สีสถานะที่แยกกันชัด
+   ========================================================= */
+:root {
+  --cr-ink: #1f2a30;
+  --cr-muted: #5b6b73;
+  --cr-paper: #f4f7f6;
+  --cr-line: #dde5e3;
+  --cr-primary: #0f5c5a;
+  --cr-primary-deep: #0a4442;
+  --cr-accent: #e7b559;
+
+  /* สีสถานะ */
+  --st-matched: #2f7d4f;
+  --st-diff: #b7791f;
+  --st-denied: #b42318;
+  --st-multiple: #6b4fa0;
+  --st-not-stm: #5b6b73;
+  --st-not-his: #2563a6;
+
+  --bs-body-font-family: 'IBM Plex Sans Thai', 'Sarabun', 'Leelawadee UI', Tahoma, sans-serif;
+  --bs-body-color: var(--cr-ink);
+  --bs-body-bg: var(--cr-paper);
+  --bs-border-color: var(--cr-line);
+  --bs-primary: var(--cr-primary);
+  --bs-primary-rgb: 15, 92, 90;
+  --bs-link-color: var(--cr-primary);
+  --bs-link-color-rgb: 15, 92, 90;
+  --bs-link-hover-color: var(--cr-primary-deep);
+  --bs-border-radius: 0.5rem;
+}
+
+body { font-size: 0.95rem; line-height: 1.6; }
+
+.btn-primary {
+  --bs-btn-bg: var(--cr-primary);
+  --bs-btn-border-color: var(--cr-primary);
+  --bs-btn-hover-bg: var(--cr-primary-deep);
+  --bs-btn-hover-border-color: var(--cr-primary-deep);
+  --bs-btn-active-bg: var(--cr-primary-deep);
+  --bs-btn-active-border-color: var(--cr-primary-deep);
+  --bs-btn-disabled-bg: var(--cr-primary);
+  --bs-btn-disabled-border-color: var(--cr-primary);
+}
+.btn-outline-primary {
+  --bs-btn-color: var(--cr-primary);
+  --bs-btn-border-color: var(--cr-primary);
+  --bs-btn-hover-bg: var(--cr-primary);
+  --bs-btn-hover-border-color: var(--cr-primary);
+  --bs-btn-active-bg: var(--cr-primary-deep);
+}
+.form-control:focus, .form-select:focus, .form-check-input:focus {
+  border-color: var(--cr-primary);
+  box-shadow: 0 0 0 0.2rem rgba(15, 92, 90, 0.2);
+}
+.form-check-input:checked { background-color: var(--cr-primary); border-color: var(--cr-primary); }
+:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 2px; }
+
+/* ---------- โครงหน้า ---------- */
+.app-shell { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 248px;
+  flex-shrink: 0;
+  background: var(--cr-primary-deep);
+  color: #d9e6e4;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.sidebar-brand { padding: 1.4rem 1.25rem 1.1rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.sidebar-brand .title { color: #fff; font-weight: 600; font-size: 1.05rem; line-height: 1.35; }
+.sidebar-brand .sub { font-size: 0.8rem; color: #9fbcb8; }
+.sidebar nav { padding: 0.75rem 0.6rem; flex: 1; overflow-y: auto; }
+.sidebar .nav-group { font-size: 0.78rem; color: #8fb0ac; padding: 0.9rem 0.7rem 0.3rem; }
+.sidebar .nav-link {
+  color: #d9e6e4;
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+.sidebar .nav-link:hover { background: rgba(255,255,255,0.07); color: #fff; }
+.sidebar .nav-link.active { background: #fff; color: var(--cr-primary-deep); font-weight: 600; }
+.sidebar-user { padding: 1rem 1.25rem; border-top: 1px solid rgba(255,255,255,0.08); font-size: 0.85rem; }
+.sidebar-user .name { color: #fff; }
+.role-tag {
+  display: inline-block; font-size: 0.72rem; padding: 0 0.45rem; border-radius: 0.3rem;
+  background: rgba(231,181,89,0.18); color: var(--cr-accent);
+}
+
+.main { flex: 1; min-width: 0; padding: 1.75rem 2rem 3rem; }
+.page-head { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; justify-content: space-between; margin-bottom: 1.25rem; }
+.page-head h1 { font-size: 1.5rem; font-weight: 600; margin: 0; }
+.page-head p { margin: 0.2rem 0 0; color: var(--cr-muted); max-width: 70ch; }
+
+.panel { background: #fff; border: 1px solid var(--cr-line); border-radius: 0.6rem; padding: 1.25rem; }
+.panel + .panel { margin-top: 1rem; }
+.panel-title { font-size: 1rem; font-weight: 600; margin-bottom: 0.9rem; }
+
+.mobile-bar { display: none; }
+
+@media (max-width: 991.98px) {
+  .sidebar { position: fixed; z-index: 1040; left: -260px; transition: left 0.2s ease; }
+  .sidebar.open { left: 0; box-shadow: 0 0 0 100vmax rgba(0,0,0,0.35); }
+  .mobile-bar {
+    display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 1rem;
+    background: var(--cr-primary-deep); color: #fff; position: sticky; top: 0; z-index: 1030;
+  }
+  .main { padding: 1.25rem 1rem 2.5rem; }
+  .app-shell { flex-direction: column; }
+}
+
+/* ---------- แถบสัดส่วนสถานะ (จุดเด่นของหน้ากระทบยอด) ---------- */
+.ledger-strip { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--cr-line); }
+.ledger-strip span { display: block; height: 100%; transition: flex-grow 0.4s ease; }
+
+.status-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.5rem; margin-top: 1rem; }
+.status-filter {
+  text-align: left; background: #fff; border: 1px solid var(--cr-line); border-left: 4px solid var(--st-color);
+  border-radius: 0.45rem; padding: 0.6rem 0.75rem; color: var(--cr-ink);
+}
+.status-filter:hover { background: #f8faf9; }
+.status-filter.active { background: color-mix(in srgb, var(--st-color) 9%, #fff); border-color: var(--st-color); }
+.status-filter .label { font-size: 0.85rem; color: var(--cr-muted); }
+.status-filter .count { font-size: 1.35rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.status-filter .amount { font-size: 0.8rem; color: var(--cr-muted); font-variant-numeric: tabular-nums; }
+
+.status-badge {
+  display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap;
+  font-size: 0.8rem; font-weight: 500; padding: 0.1rem 0.5rem; border-radius: 0.3rem;
+  color: var(--st-color); background: color-mix(in srgb, var(--st-color) 11%, #fff);
+}
+.status-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--st-color); }
+
+/* ---------- ตาราง ---------- */
+.table-wrap { overflow-x: auto; }
+.data-table { font-size: 0.875rem; margin: 0; }
+.data-table thead th {
+  background: #f1f5f4; color: var(--cr-muted); font-weight: 500; white-space: nowrap;
+  border-bottom: 1px solid var(--cr-line); position: sticky; top: 0;
+}
+.data-table td { vertical-align: middle; white-space: nowrap; }
+.data-table td.wrap { white-space: normal; min-width: 160px; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.diff-neg { color: var(--st-denied); }
+.diff-pos { color: var(--st-not-his); }
+.muted { color: var(--cr-muted); }
+.small-id { font-size: 0.78rem; color: var(--cr-muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- หน้า login ---------- */
+.login-page {
+  min-height: 100vh; display: grid; grid-template-columns: 1fr minmax(320px, 440px);
+}
+.login-side {
+  background: var(--cr-primary-deep); color: #d9e6e4; padding: 3rem; display: flex; flex-direction: column; justify-content: flex-end;
+}
+.login-side h2 { color: #fff; font-weight: 600; font-size: 2rem; line-height: 1.3; max-width: 16ch; }
+.login-side p { max-width: 44ch; color: #a9c4c0; }
+.login-rows { margin: 2rem 0; display: grid; gap: 0.5rem; max-width: 420px; }
+.login-rows div {
+  display: grid; grid-template-columns: 1fr auto; padding: 0.55rem 0.8rem; border-radius: 0.4rem;
+  background: rgba(255,255,255,0.05); font-size: 0.9rem; border-left: 3px solid var(--st-color);
+}
+.login-form { display: flex; align-items: center; padding: 2.5rem; background: #fff; }
+.login-form form { width: 100%; }
+@media (max-width: 767.98px) {
+  .login-page { grid-template-columns: 1fr; }
+  .login-side { display: none; }
+}
+
+/* ---------- นำเข้าไฟล์ ---------- */
+.drop-zone {
+  border: 2px dashed var(--cr-line); border-radius: 0.6rem; padding: 1.5rem; text-align: center; background: #fafcfb;
+}
+.drop-zone.drag { border-color: var(--cr-primary); background: #eef5f4; }
+
+/* sweetalert ใช้ฟอนต์เดียวกับระบบ */
+.swal2-popup { font-family: var(--bs-body-font-family); }
+.swal2-styled.swal2-confirm { background-color: var(--cr-primary) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* ---------- แยกกองทุน ---------- */
+.fund-summary tbody tr { cursor: pointer; }
+.fund-summary tbody tr.active td { background: #eef5f4; }
+.fund-summary tbody tr.active td:first-child { box-shadow: inset 4px 0 0 var(--cr-primary); }
+.fund-summary tfoot td { font-weight: 600; border-top: 2px solid var(--cr-line); }
+.count-link {
+  background: none; border: 0; padding: 0; color: var(--st-color); font-variant-numeric: tabular-nums;
+  text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--st-color) 40%, transparent);
+}
+.count-link:disabled { color: var(--cr-muted); text-decoration: none; }
+.chip {
+  border: 1px solid var(--cr-line); background: #fff; border-radius: 999px; padding: 0.2rem 0.75rem; font-size: 0.85rem;
+}
+.chip.active { background: var(--cr-primary); border-color: var(--cr-primary); color: #fff; }
+.fund-list .list-group-item.active { background: #eef5f4; color: var(--cr-ink); border-color: var(--cr-line); box-shadow: inset 4px 0 0 var(--cr-primary); }
+.item-results { max-height: 320px; overflow-y: auto; }

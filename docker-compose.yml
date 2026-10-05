@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: claim_recon
+      POSTGRES_USER: recon
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-recon_pass}
+      TZ: Asia/Bangkok
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"   # เปิดเฉพาะเครื่องนี้ ไว้ใช้ตอนพัฒนา
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recon -d claim_recon"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: backend/.env
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+
+volumes:
+  pgdata:
