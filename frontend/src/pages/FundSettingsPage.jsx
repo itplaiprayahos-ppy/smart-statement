@@ -6,6 +6,7 @@ import { money } from '../utils/format.js';
 const SOURCE_LABEL = { nondrug: 'ค่าบริการ', drug: 'ยา' };
 const blankFund = () => ({
   originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], pttypes: [],
+  target_send: 95, target_success: 90, target_complete: 95,
 });
 
 /** เลือกสิทธิการรักษาของ HOSxP ที่เข้าเงื่อนไขกองทุน (ไม่เลือก = ทุกสิทธิ) */
@@ -99,6 +100,8 @@ export default function FundSettingsPage() {
         originalCode: data.code, code: data.code, name: data.name, sort_order: data.sort_order,
         is_active: data.is_active, columnsText: (data.stm_columns || []).join('\n'), items: data.items,
         pttypes: data.pttypes || [],
+        target_send: Number(data.target_send), target_success: Number(data.target_success),
+        target_complete: Number(data.target_complete),
       });
       setDirty(false);
     } catch (err) {
@@ -140,6 +143,7 @@ export default function FundSettingsPage() {
       stm_columns: form.columnsText.split('\n').map((s) => s.trim()).filter(Boolean),
       items: form.items,
       pttypes: form.pttypes,
+      target_send: form.target_send, target_success: form.target_success, target_complete: form.target_complete,
     };
     setBusy(true);
     try {
@@ -234,6 +238,21 @@ export default function FundSettingsPage() {
                       ใส่ชื่อกองทุนตามหัวตารางแถวที่ 13 ของไฟล์ REP เช่น HC, AE, INST, DMIS, PP บรรทัดละ 1 ชื่อ
                       ระบบรวมทุกคอลัมน์ย่อยใต้ชื่อนั้นให้ (HC = HC + DRUG) ยกเว้นกลุ่มที่มี “ยอดชดเชยที่จ่ายจริง” จะใช้เฉพาะคอลัมน์นั้น
                       ถ้าต้องการคอลัมน์เดียว ใส่ชื่อเต็มแบบ “กลุ่ม / คอลัมน์ย่อย” นำเข้าไฟล์ใหม่ทุกครั้งหลังแก้
+                    </div>
+                  </div>
+                  <div className="col-12">
+                    <div className="form-label mb-1">เป้าหมายตัวชี้วัด (%) ใช้แสดงสีในแดชบอร์ดภาพรวม</div>
+                    <div className="row g-2">
+                      {[['target_send', 'อัตราการส่งเบิก'], ['target_success', 'อัตราเคลมสำเร็จ'], ['target_complete', 'ความครบถ้วนของข้อมูล']].map(([k, label]) => (
+                        <div className="col-sm-4" key={k}>
+                          <div className="input-group input-group-sm">
+                            <span className="input-group-text">{label}</span>
+                            <input type="number" min="0" max="100" step="0.5" className="form-control" value={form[k]}
+                              onChange={(e) => update({ [k]: e.target.value })} aria-label={`เป้าหมาย${label}`} />
+                            <span className="input-group-text">%</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                   <div className="col-12">

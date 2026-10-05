@@ -10,6 +10,7 @@ import UsersPage from './pages/UsersPage.jsx';
 import AccountPage from './pages/AccountPage.jsx';
 import FundReconPage from './pages/FundReconPage.jsx';
 import FundSettingsPage from './pages/FundSettingsPage.jsx';
+import ReportsPage from './pages/ReportsPage.jsx';
 
 export default function App() {
   return (
@@ -18,10 +19,14 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<Layout />}>
           <Route index element={<DashboardPage />} />
-          <Route path="import" element={<ImportPage />} />
-          <Route path="recon/opd" element={<ReconOpdPage />} />
-          <Route path="recon/funds" element={<FundReconPage />} />
           <Route path="account" element={<AccountPage />} />
+          {/* หน้าที่มีข้อมูลรายคนไข้: ผู้บริหารเข้าไม่ได้ */}
+          <Route element={<ProtectedRoute roles={['admin', 'user']} />}>
+            <Route path="import" element={<ImportPage />} />
+            <Route path="recon/opd" element={<ReconOpdPage />} />
+            <Route path="recon/funds" element={<FundReconPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+          </Route>
           <Route element={<ProtectedRoute roles={['admin']} />}>
             <Route path="mappings" element={<MappingsPage />} />
             <Route path="funds/settings" element={<FundSettingsPage />} />

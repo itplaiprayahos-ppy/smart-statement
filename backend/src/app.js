@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { isProd } from './config/env.js';
 import { requireAuth } from './middleware/auth.js';
 import { errorHandler, notFound } from './middleware/errorHandler.js';
+import { HttpError } from './utils/http.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/users.routes.js';
 import mappingRoutes from './routes/mappings.routes.js';
@@ -16,6 +17,7 @@ import hisRoutes from './routes/his.routes.js';
 import reconRoutes from './routes/recon.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import fundRoutes from './routes/funds.routes.js';
+import reportRoutes from './routes/reports.routes.js';
 
 const app = express();
 
@@ -32,6 +34,12 @@ app.use('/api/auth', authRoutes);
 
 // ทุกเส้นทางด้านล่างต้อง login
 app.use('/api', requireAuth);
+
+// บทบาทผู้บริหาร: ดูได้เฉพาะแดชบอร์ดตัวชี้วัด (ไม่มีข้อมูลรายคนไข้ ตามหลักเข้าถึงเท่าที่จำเป็น)
+app.use('/api', (req, _res, next) => {
+  if (req.user.role !== 'executive' || req.path === '/dashboard/kpi') return next();
+  return next(new HttpError(403, 'บทบาทผู้บริหารดูได้เฉพาะแดชบอร์ดตัวชี้วัด'));
+});
 app.use('/api/users', userRoutes);
 app.use('/api/mappings', mappingRoutes);
 app.use('/api/imports', importRoutes);
@@ -39,6 +47,7 @@ app.use('/api/his', hisRoutes);
 app.use('/api/recon', reconRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/funds', fundRoutes);
+app.use('/api/reports', reportRoutes);
 app.use('/api', notFound);
 
 // production: ให้ Express เสิร์ฟหน้าเว็บที่ build แล้ว (frontend/dist)

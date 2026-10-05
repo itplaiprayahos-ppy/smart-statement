@@ -36,7 +36,7 @@ export async function requireAuth(req, _res, next) {
 
     // ตรวจกับฐานข้อมูลทุกครั้ง เพื่อให้การปิดบัญชี/เปลี่ยน role มีผลทันที
     const { rows } = await db.query(
-      'SELECT id, username, full_name, role, is_active FROM users WHERE id = $1',
+      'SELECT id, username, full_name, role, is_active, fund_codes FROM users WHERE id = $1',
       [payload.sub],
     );
     const user = rows[0];

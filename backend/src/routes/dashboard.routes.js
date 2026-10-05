@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { db } from '../config/db.js';
 import { asyncHandler } from '../utils/http.js';
+import { audit } from '../utils/audit.js';
+import { fundKpis } from '../services/dashboardService.js';
+import { readDateRange } from './his.routes.js';
 
 const router = Router();
 
@@ -21,6 +24,14 @@ router.get('/', asyncHandler(async (_req, res) => {
     lastImport: lastImport.rows[0] || null,
     lastPull: lastPull.rows[0] || null,
   });
+}));
+
+/** ตัวชี้วัดรายกองทุน (ผู้บริหารเข้าถึงได้ ไม่มีข้อมูลรายคนไข้) */
+router.get('/kpi', asyncHandler(async (req, res) => {
+  const range = readDateRange(req.query);
+  const data = await fundKpis(range);
+  if (!data.cached) await audit(req, 'dashboard_kpi', range);
+  res.json(data);
 }));
 
 export default router;

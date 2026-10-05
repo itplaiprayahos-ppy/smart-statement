@@ -136,3 +136,16 @@ export function monthsBetween(dateFrom, dateTo) {
 }
 
 export const percent = (part, whole) => (whole ? `${((part / whole) * 100).toFixed(1)}%` : '–');
+
+/* ---------- ตัวชี้วัด ---------- */
+export const rate = (part, whole) => (whole ? (part / whole) * 100 : null);
+
+/** สีตามเป้าหมาย: ถึงเป้า = เขียว, ต่ำกว่าเป้าไม่เกิน 10 จุด = เหลือง, ต่ำกว่านั้น = แดง */
+export function kpiLevel(value, target) {
+  if (value === null || value === undefined) return 'none';
+  if (value >= target) return 'good';
+  if (value >= target - 10) return 'warn';
+  return 'bad';
+}
+
+export const fmtRate = (v) => (v === null || v === undefined ? '–' : `${v.toFixed(1)}%`);

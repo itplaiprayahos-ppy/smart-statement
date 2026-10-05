@@ -41,13 +41,14 @@ function fundCte() {
     GROUP BY i.vn, fi.fund_code
   ),
   elig AS (
-    SELECT fv.fund_code, fv.items,
+    SELECT fv.fund_code, fv.items, array_to_string(fv.icodes, ', ') AS item_codes,
            (SELECT string_agg(COALESCE(rq.item_name, rq.icode), ', ' ORDER BY rq.item_name)
               FROM fund_items rq
              WHERE rq.fund_code = fv.fund_code AND rq.required AND NOT (rq.icode = ANY (fv.icodes))
            ) AS missing_required,
            fv.his_fund_amount,
            r.vn, r.hn, r.cid, r.patient_name, r.sdate, r.pttype, r.pttype_name, r.hipdata_code,
+           r.pdx, r.uc_money,
            r.line_id, r.rep_no, r.tran_id, r.stm_docs, r.error_code,
            (r.fund_amounts ->> fv.fund_code)::numeric AS stm_fund_amount,
            CASE
@@ -68,10 +69,12 @@ function fundCte() {
                THEN 'สิทธิไม่อยู่ในเงื่อนไขกองทุน'
              ELSE 'ไม่มีรายการที่ตั้งค่าไว้'
            END AS items,
+           NULL::text AS item_codes,
            NULL::text AS missing_required,
            NULL::numeric AS his_fund_amount,
            r.vn, COALESCE(r.hn, r.nhso_hn) AS hn, COALESCE(r.cid, r.pid) AS cid, r.patient_name, r.sdate,
            r.pttype, r.pttype_name, r.hipdata_code,
+           r.pdx, r.uc_money,
            r.line_id, r.rep_no, r.tran_id, r.stm_docs, r.error_code,
            kv.value::numeric AS stm_fund_amount,
            'EXTRA_PAID' AS fund_status
@@ -123,7 +126,7 @@ function analysisCte(src) {
  * คำนวณผลแยกกองทุนครั้งเดียวลงตารางชั่วคราว fy (มีคอลัมน์ missing_common เพิ่ม)
  * แล้วให้ทุกคำสั่งสรุปอ่านจากตารางนี้ แทนการคำนวณซ้ำทุกคำสั่ง
  */
-async function withFundTable(opts, fn) {
+export async function withFundTable(opts, fn) {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -171,7 +174,7 @@ const PERSON = 'COALESCE(cid, hn)';
  * เดือนในช่วงที่ยังไม่เคยดึง HOSxP และเดือนที่ต้องดึงใหม่เพราะเพิ่มรายการในกองทุนหลังดึงครั้งล่าสุด
  * (ตรวจทีละเดือน ไม่ใช่เทียบกับการดึงครั้งล่าสุดของช่วงใดก็ได้)
  */
-async function pullCoverage(client, { dateFrom, dateTo }) {
+export async function pullCoverage(client, { dateFrom, dateTo }) {
   const { rows } = await client.query(`
     WITH m AS (
       SELECT d::date AS month_start,

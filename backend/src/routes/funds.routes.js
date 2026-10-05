@@ -62,8 +62,17 @@ function readFund(body = {}) {
   })).filter((it) => it.icode);
   const pttypes = [...new Set((Array.isArray(body.pttypes) ? body.pttypes : [])
     .map((p) => String(p).trim()).filter(Boolean))];
+  const pct = (v, d) => {
+    if (v === undefined || v === null || v === '') return d;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 100) throw new HttpError(400, 'เป้าหมายต้องเป็นตัวเลข 0–100');
+    return n;
+  };
+  const targets = {
+    send: pct(body.target_send, 95), success: pct(body.target_success, 90), complete: pct(body.target_complete, 95),
+  };
   return {
-    code, name, cols, items, pttypes,
+    code, name, cols, items, pttypes, targets,
     sort_order: Number.isInteger(Number(body.sort_order)) ? Number(body.sort_order) : 0,
     is_active: body.is_active !== false,
   };
@@ -76,15 +85,18 @@ async function saveFund(req, res, originalCode) {
     if (originalCode) {
       const { rowCount } = await client.query(
         `UPDATE funds SET code = $1, name = $2, stm_columns = $3, sort_order = $4, is_active = $5, pttypes = $7,
-           updated_at = now()
+           target_send = $8, target_success = $9, target_complete = $10, updated_at = now()
          WHERE code = $6`,
-        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, originalCode, JSON.stringify(f.pttypes)],
+        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, originalCode, JSON.stringify(f.pttypes),
+          f.targets.send, f.targets.success, f.targets.complete],
       );
       if (!rowCount) throw new HttpError(404, 'ไม่พบกองทุน');
     } else {
       await client.query(
-        'INSERT INTO funds (code, name, stm_columns, sort_order, is_active, pttypes) VALUES ($1, $2, $3, $4, $5, $6)',
-        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, JSON.stringify(f.pttypes)],
+        `INSERT INTO funds (code, name, stm_columns, sort_order, is_active, pttypes, target_send, target_success, target_complete)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, JSON.stringify(f.pttypes),
+          f.targets.send, f.targets.success, f.targets.complete],
       );
     }
     // แทนที่รายการ แต่คงเวลาเพิ่มเดิมไว้ เพื่อให้รู้ว่ารายการไหนเพิ่มใหม่หลังดึง HOSxP

@@ -17,7 +17,9 @@ const loginLimiter = rateLimit({
   message: { message: 'ลองเข้าสู่ระบบหลายครั้งเกินไป กรุณารอ 15 นาที' },
 });
 
-const publicUser = (u) => ({ id: u.id, username: u.username, full_name: u.full_name, role: u.role });
+const publicUser = (u) => ({
+  id: u.id, username: u.username, full_name: u.full_name, role: u.role, fund_codes: u.fund_codes || [],
+});
 
 router.post('/login', loginLimiter, asyncHandler(async (req, res) => {
   const { username, password } = req.body || {};

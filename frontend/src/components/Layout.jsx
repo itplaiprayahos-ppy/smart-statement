@@ -5,10 +5,11 @@ import { confirmAction } from '../utils/alert.js';
 
 const MENU = [
   { group: 'งานประจำ' },
-  { to: '/', icon: 'bi-house', label: 'ภาพรวม', end: true },
+  { to: '/', icon: 'bi-speedometer2', label: 'ภาพรวม', end: true, exec: true },
   { to: '/import', icon: 'bi-file-earmark-arrow-up', label: 'นำเข้าไฟล์ สปสช.' },
   { to: '/recon/opd', icon: 'bi-ui-checks', label: 'กระทบยอด OPD' },
   { to: '/recon/funds', icon: 'bi-diagram-3', label: 'แยกกองทุน OPD' },
+  { to: '/reports', icon: 'bi-file-earmark-arrow-down', label: 'ส่งออกรายงาน' },
   { group: 'ผู้ดูแลระบบ', admin: true },
   { to: '/mappings', icon: 'bi-table', label: 'รูปแบบไฟล์ Excel', admin: true },
   { to: '/funds/settings', icon: 'bi-sliders', label: 'ตั้งค่ากองทุน', admin: true },
@@ -17,6 +18,8 @@ const MENU = [
 
 export default function Layout() {
   const { user, isAdmin, logout } = useAuth();
+  const isExec = user.role === 'executive';
+  const ROLE_TH = { admin: 'ผู้ดูแลระบบ', user: 'ผู้ใช้งาน', executive: 'ผู้บริหาร' };
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
@@ -42,7 +45,7 @@ export default function Layout() {
           <div className="sub">HOSxP เทียบ Statement สปสช.</div>
         </div>
         <nav>
-          {MENU.filter((m) => !m.admin || isAdmin).map((m) =>
+          {MENU.filter((m) => (isExec ? m.exec : (!m.admin || isAdmin))).map((m) =>
             m.group ? (
               <div key={m.group} className="nav-group">{m.group}</div>
             ) : (
@@ -56,7 +59,7 @@ export default function Layout() {
         <div className="sidebar-user">
           <div className="name">{user.full_name || user.username}</div>
           <div className="d-flex align-items-center justify-content-between mt-1">
-            <span className="role-tag">{user.role === 'admin' ? 'ผู้ดูแลระบบ' : 'ผู้ใช้งาน'}</span>
+            <span className="role-tag">{ROLE_TH[user.role] || user.role}</span>
             <span className="d-flex gap-1">
               <NavLink to="/account" className="btn btn-sm btn-link text-light p-1" title="เปลี่ยนรหัสผ่าน">
                 <i className="bi bi-key" /><span className="visually-hidden">เปลี่ยนรหัสผ่าน</span>
