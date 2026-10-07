@@ -13,7 +13,6 @@ const MENU = [
   { group: 'ผู้ดูแลระบบ', admin: true },
   { to: '/mappings', icon: 'bi-table', label: 'รูปแบบไฟล์ Excel', admin: true },
   { to: '/funds/settings', icon: 'bi-sliders', label: 'ตั้งค่ากองทุน', admin: true },
-  { to: '/error-codes', icon: 'bi-exclamation-octagon', label: 'รหัสข้อผิดพลาด', admin: true },
   { to: '/users', icon: 'bi-people', label: 'ผู้ใช้งาน', admin: true },
 ];
 

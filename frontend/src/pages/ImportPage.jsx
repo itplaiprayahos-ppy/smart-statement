@@ -32,9 +32,14 @@ export default function ImportPage() {
   const [mappings, setMappings] = useState([]);
   const [fields, setFields] = useState({});
   const [mappingId, setMappingId] = useState('');
-  const [file, setFile] = useState(null);
+  // ไฟล์ที่เลือก: { id, file, status, preview, result, error }
+  // status: pending | checking | checked | invalid | importing | done | failed
+  const [items, setItems] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
-  const [preview, setPreview] = useState(null);
+  const preview = items.find((x) => x.id === selected)?.preview || null;
+  const setItem = (id, patch) => setItems((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const [history, setHistory] = useState([]);
   const [legacy, setLegacy] = useState(null);
   const inputRef = useRef(null);
@@ -73,47 +78,85 @@ export default function ImportPage() {
     loadHistory();
   }, [loadHistory]);
 
-  const pickFile = (f) => {
-    if (!f) return;
-    if (!/\.(xlsx|xls)$/i.test(f.name)) return showError('รองรับเฉพาะไฟล์ .xlsx และ .xls');
-    setFile(f);
-    setPreview(null);
+  const MAX_FILES = 50;
+  const pickFiles = (fileList) => {
+    const all = Array.from(fileList || []);
+    if (!all.length) return;
+    const bad = all.filter((f) => !/\.(xlsx|xls)$/i.test(f.name));
+    const good = all.filter((f) => /\.(xlsx|xls)$/i.test(f.name));
+    setItems((list) => {
+      const have = new Set(list.map((x) => `${x.file.name}|${x.file.size}`));
+      const fresh = good.filter((f) => !have.has(`${f.name}|${f.size}`))
+        .map((f, i) => ({ id: `${Date.now()}-${i}-${f.name}`, file: f, status: 'pending' }));
+      return [...list.filter((x) => x.status !== 'done'), ...fresh].slice(0, MAX_FILES);
+    });
+    if (bad.length) showError(`ข้ามไฟล์ที่ไม่ใช่ .xlsx/.xls: ${bad.map((f) => f.name).join(', ')}`);
+    if (inputRef.current) inputRef.current.value = '';
   };
 
-  const formData = () => {
+  const removeItem = (id) => {
+    setItems((list) => list.filter((x) => x.id !== id));
+    if (selected === id) setSelected(null);
+  };
+
+  const formData = (file) => {
     const fd = new FormData();
     fd.append('mappingId', mappingId);
     fd.append('file', file);
     return fd;
   };
 
+  const importable = (x) => x.status === 'checked' && x.preview && x.preview.missingRequired.length === 0 && x.preview.validRows > 0;
+
+  /** ตรวจทุกไฟล์ทีละไฟล์ */
   const runPreview = async () => {
-    try {
-      const res = await withLoading('กำลังอ่านไฟล์…', () => api.post('/imports/preview', formData()));
-      setPreview(res.data);
-    } catch (err) {
-      showError(err, 'อ่านไฟล์ไม่สำเร็จ');
+    setBusy(true);
+    const targets = items.filter((x) => !['done', 'importing'].includes(x.status));
+    for (const x of targets) {
+      setItem(x.id, { status: 'checking', error: null });
+      try {
+        const { data } = await api.post('/imports/preview', formData(x.file));
+        const ok = data.missingRequired.length === 0 && data.validRows > 0;
+        setItem(x.id, { status: ok ? 'checked' : 'invalid', preview: data });
+      } catch (err) {
+        setItem(x.id, { status: 'invalid', preview: null, error: err.response?.data?.message || err.message });
+      }
     }
+    setBusy(false);
+    if (targets.length === 1) setSelected(targets[0].id);
   };
 
+  /** นำเข้าไฟล์ที่ตรวจผ่านทีละไฟล์ ไฟล์ที่ล้มเหลวไม่กระทบไฟล์อื่น */
   const runImport = async () => {
+    const ready = items.filter(importable);
+    const rows = ready.reduce((a, x) => a + x.preview.validRows, 0);
+    const errs = ready.reduce((a, x) => a + x.preview.errorCount, 0);
     const ok = await confirmAction({
-      title: `นำเข้า ${int(preview.validRows)} รายการ?`,
-      text: preview.errorCount ? `แถวที่มีปัญหา ${int(preview.errorCount)} แถวจะไม่ถูกนำเข้า` : 'รายการที่เคยนำเข้าแล้วจะถูกอัปเดตเป็นข้อมูลล่าสุด',
+      title: `นำเข้า ${int(ready.length)} ไฟล์ (${int(rows)} รายการ)?`,
+      text: `${errs ? `แถวที่มีปัญหา ${int(errs)} แถวจะไม่ถูกนำเข้า ` : ''}รายการที่เคยนำเข้าแล้วจะถูกอัปเดตเป็นข้อมูลล่าสุด`,
       confirmText: 'นำเข้า',
     });
     if (!ok) return;
-    try {
-      const res = await withLoading('กำลังนำเข้า…', () => api.post('/imports', formData()));
-      const r = res.data;
-      await showSuccess('นำเข้าแล้ว', `เพิ่มใหม่ ${int(r.inserted)} รายการ<br>อัปเดตรายการเดิม ${int(r.updated)} รายการ${r.errorCount ? `<br>ข้าม ${int(r.errorCount)} แถวที่มีปัญหา` : ''}`);
-      setFile(null);
-      setPreview(null);
-      if (inputRef.current) inputRef.current.value = '';
-      loadHistory();
-    } catch (err) {
-      showError(err, 'นำเข้าไม่สำเร็จ');
+    setBusy(true);
+    let inserted = 0; let updated = 0; let failed = 0;
+    for (const x of ready) {
+      setItem(x.id, { status: 'importing' });
+      try {
+        const { data } = await api.post('/imports', formData(x.file));
+        inserted += data.inserted; updated += data.updated;
+        setItem(x.id, { status: 'done', result: data });
+      } catch (err) {
+        failed += 1;
+        setItem(x.id, { status: 'failed', error: err.response?.data?.message || err.message });
+      }
     }
+    setBusy(false);
+    loadHistory();
+    await (failed ? showError : showSuccess)(
+      failed ? `นำเข้าไม่สำเร็จ ${int(failed)} ไฟล์` : 'นำเข้าแล้ว',
+      `สำเร็จ ${int(ready.length - failed)} ไฟล์: เพิ่มใหม่ ${int(inserted)} รายการ, อัปเดตรายการเดิม ${int(updated)} รายการ`
+        + (failed ? '<br>ดูสาเหตุในตารางรายการไฟล์' : ''),
+    );
   };
 
   const viewErrors = async (id) => {
@@ -171,7 +214,8 @@ export default function ImportPage() {
         <div className="row g-3 align-items-end">
           <div className="col-lg-4">
             <label className="form-label" htmlFor="mapping">รูปแบบไฟล์</label>
-            <select id="mapping" className="form-select" value={mappingId} onChange={(e) => { setMappingId(e.target.value); setPreview(null); }}>
+            <select id="mapping" className="form-select" value={mappingId} disabled={busy}
+              onChange={(e) => { setMappingId(e.target.value); setItems((l) => l.map((x) => ({ ...x, status: x.status === 'done' ? 'done' : 'pending', preview: null }))); setSelected(null); }}>
               {mappings.length === 0 && <option value="">ยังไม่มีรูปแบบไฟล์ OPD</option>}
               {mappings.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
@@ -181,34 +225,102 @@ export default function ImportPage() {
               className={`drop-zone ${drag ? 'drag' : ''}`}
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
-              onDrop={(e) => { e.preventDefault(); setDrag(false); pickFile(e.dataTransfer.files[0]); }}
+              onDrop={(e) => { e.preventDefault(); setDrag(false); if (!busy) pickFiles(e.dataTransfer.files); }}
             >
-              <i className="bi bi-file-earmark-spreadsheet fs-3 muted" aria-hidden="true" />
+              <i className="bi bi-files fs-3 muted" aria-hidden="true" />
               <div className="mt-1">
-                {file ? <strong>{file.name}</strong> : 'ลากไฟล์มาวางที่นี่ หรือ'}{' '}
-                <button type="button" className="btn btn-link p-0 align-baseline" onClick={() => inputRef.current?.click()}>
-                  {file ? 'เปลี่ยนไฟล์' : 'เลือกไฟล์'}
+                ลากไฟล์มาวางที่นี่ได้หลายไฟล์พร้อมกัน หรือ{' '}
+                <button type="button" className="btn btn-link p-0 align-baseline" disabled={busy} onClick={() => inputRef.current?.click()}>
+                  เลือกไฟล์
                 </button>
+                <div className="small muted">สูงสุด {MAX_FILES} ไฟล์ต่อครั้ง</div>
               </div>
-              <input ref={inputRef} type="file" accept=".xlsx,.xls" hidden onChange={(e) => pickFile(e.target.files[0])} />
+              <input ref={inputRef} type="file" accept=".xlsx,.xls" multiple hidden onChange={(e) => pickFiles(e.target.files)} />
             </div>
           </div>
         </div>
-        <div className="mt-3 d-flex gap-2">
-          <button type="button" className="btn btn-outline-primary" disabled={!file || !mappingId} onClick={runPreview}>
-            <i className="bi bi-search me-1" />ตรวจไฟล์
+
+        {items.length > 0 && (
+          <div className="table-wrap mt-3">
+            <table className="table table-sm table-hover data-table clickable mb-0">
+              <thead>
+                <tr>
+                  <th>ไฟล์</th><th>เลขที่ REP</th><th className="num">แถว</th><th className="num">นำเข้าได้</th>
+                  <th className="num">มีปัญหา</th><th>สถานะ</th><th />
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((x) => {
+                  const p = x.preview;
+                  const fundMissing = p ? Object.values(p.fundColumns || {}).filter((f) => f.missing.length).length : 0;
+                  return (
+                    <tr key={x.id} className={selected === x.id ? 'table-active' : ''}
+                      onClick={() => p && setSelected(x.id)} title={p ? 'ดูผลการตรวจไฟล์' : undefined}>
+                      <td>{x.file.name}<div className="small-id">{(x.file.size / 1024).toFixed(0)} KB</div></td>
+                      <td>{p?.stmDoc || <span className="muted">–</span>}</td>
+                      <td className="num">{p ? int(p.totalRows) : '–'}</td>
+                      <td className="num">{p ? int(p.validRows) : '–'}</td>
+                      <td className={`num ${p?.errorCount ? 'text-danger' : ''}`}>{p ? int(p.errorCount) : '–'}</td>
+                      <td className="small">
+                        {x.status === 'pending' && <span className="muted">รอตรวจ</span>}
+                        {x.status === 'checking' && <><span className="spinner-border spinner-border-sm me-1" />กำลังตรวจ</>}
+                        {x.status === 'checked' && (
+                          <span className="text-success"><i className="bi bi-check-circle me-1" />พร้อมนำเข้า
+                            {fundMissing > 0 && <span className="text-warning-emphasis"> (ไม่พบคอลัมน์กองทุน {fundMissing})</span>}
+                          </span>
+                        )}
+                        {x.status === 'invalid' && (
+                          <span className="text-danger"><i className="bi bi-x-circle me-1" />
+                            {x.error || (p?.missingRequired.length ? `ไม่พบคอลัมน์: ${p.missingRequired.join(', ')}` : 'ไม่มีรายการที่นำเข้าได้')}
+                          </span>
+                        )}
+                        {x.status === 'importing' && <><span className="spinner-border spinner-border-sm me-1" />กำลังนำเข้า</>}
+                        {x.status === 'done' && (
+                          <span className="text-success"><i className="bi bi-check2-all me-1" />
+                            นำเข้าแล้ว (ใหม่ {int(x.result.inserted)}, อัปเดต {int(x.result.updated)})
+                          </span>
+                        )}
+                        {x.status === 'failed' && <span className="text-danger"><i className="bi bi-x-circle me-1" />{x.error}</span>}
+                      </td>
+                      <td className="text-end">
+                        {!['checking', 'importing'].includes(x.status) && (
+                          <button type="button" className="btn btn-sm btn-link text-danger" disabled={busy}
+                            onClick={(e) => { e.stopPropagation(); removeItem(x.id); }} title="นำออกจากรายการ">
+                            <i className="bi bi-x-lg" /><span className="visually-hidden">นำออก</span>
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="mt-3 d-flex flex-wrap gap-2 align-items-center">
+          <button type="button" className="btn btn-outline-primary" disabled={busy || !mappingId || !items.some((x) => !['done'].includes(x.status))} onClick={runPreview}>
+            <i className="bi bi-search me-1" />ตรวจไฟล์{items.length > 1 ? `ทั้งหมด (${items.filter((x) => x.status !== 'done').length})` : ''}
           </button>
-          {preview && preview.missingRequired.length === 0 && preview.validRows > 0 && (
-            <button type="button" className="btn btn-primary" onClick={runImport}>
-              <i className="bi bi-check2 me-1" />นำเข้า {int(preview.validRows)} รายการ
+          {items.some(importable) && (
+            <button type="button" className="btn btn-primary" disabled={busy} onClick={runImport}>
+              <i className="bi bi-check2 me-1" />
+              นำเข้า {int(items.filter(importable).length)} ไฟล์ ({int(items.filter(importable).reduce((a, x) => a + x.preview.validRows, 0))} รายการ)
             </button>
           )}
+          {items.length > 0 && (
+            <button type="button" className="btn btn-link" disabled={busy} onClick={() => { setItems([]); setSelected(null); }}>ล้างรายการ</button>
+          )}
+          {items.some((x) => x.preview) && <span className="small muted ms-auto">คลิกแถวเพื่อดูผลการตรวจของไฟล์นั้น</span>}
         </div>
       </div>
 
       {preview && (
         <div className="panel">
-          <div className="panel-title">ผลการตรวจไฟล์ {preview.fileName}</div>
+          <div className="d-flex justify-content-between align-items-baseline">
+            <div className="panel-title">ผลการตรวจไฟล์ {preview.fileName}</div>
+            <button type="button" className="btn btn-sm btn-link" onClick={() => setSelected(null)}>ปิด</button>
+          </div>
           <p className="muted mb-3">
             {preview.stmDoc
               ? <>เลขที่ REP <strong>{preview.stmDoc}</strong>{preview.stmPeriod && ` (${thaiMonth(preview.stmPeriod.slice(0, 7))})`}, </>

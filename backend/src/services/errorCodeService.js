@@ -1,5 +1,11 @@
 import { db } from '../config/db.js';
 
+/*
+ * ตารางรหัสข้อผิดพลาด e-Claim (error_codes) เป็นตาราง lookup อย่างเดียว
+ * ข้อมูลมาจาก db/seed/eclaim_error_codes.tsv ผ่าน migration
+ * ปรับปรุง: แก้ไฟล์ .tsv แล้วรัน npm run build:error-codes -- 0XX_error_codes_update.sql และ npm run migrate
+ */
+
 /**
  * รหัสข้อผิดพลาด e-Claim (ติด C)
  * ค่าใน REP อาจเป็น "C438", "438" หรือหลายรหัส เช่น "C438,C301" -> แยกเป็นเลขรหัส ["438", "301"]
@@ -24,7 +30,6 @@ export async function errorCodeMap() {
   }
   return cache;
 }
-const clearCache = () => { cache = null; };
 
 /** เติม error_detail / error_guidance ให้แต่ละแถวที่มี error_code */
 export async function annotateErrors(rows) {
@@ -78,43 +83,4 @@ export function parseErrorCodeText(text) {
   return out
     .filter((r) => r.description && r.description !== 'รายละเอียด')
     .map((r) => ({ ...r, guidance: r.guidance || null }));
-}
-
-export async function importErrorCodes(items) {
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-    let n = 0;
-    for (const it of items) {
-      await client.query(
-        `INSERT INTO error_codes (code, description, guidance) VALUES ($1, $2, $3)
-         ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description, guidance = EXCLUDED.guidance, updated_at = now()`,
-        [it.code, it.description.slice(0, 2000), it.guidance ? it.guidance.slice(0, 4000) : null],
-      );
-      n += 1;
-    }
-    await client.query('COMMIT');
-    return n;
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-    clearCache();
-  }
-}
-
-export async function saveErrorCode(code, description, guidance) {
-  await db.query(
-    `INSERT INTO error_codes (code, description, guidance) VALUES ($1, $2, $3)
-     ON CONFLICT (code) DO UPDATE SET description = EXCLUDED.description, guidance = EXCLUDED.guidance, updated_at = now()`,
-    [code, description, guidance || null],
-  );
-  clearCache();
-}
-
-export async function deleteErrorCode(code) {
-  const { rowCount } = await db.query('DELETE FROM error_codes WHERE code = $1', [code]);
-  clearCache();
-  return rowCount;
 }
