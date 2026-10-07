@@ -61,7 +61,7 @@ export default function FundItemAnalysis({ mode, params, fundCode, onShowMissing
                 <th className="num">ได้รับเงิน</th>
                 <th className="num">ไม่ได้รับเงินกองทุนนี้</th>
                 <th className="num">ถูกปฏิเสธ</th>
-                <th className="num">ไม่พบใน Statement</th>
+                <th className="num">ไม่พบใน REP</th>
                 <th>อัตราได้รับเงิน</th>
                 <th className="num">ยอดตั้งเบิก</th>
               </tr>
@@ -104,7 +104,7 @@ export default function FundItemAnalysis({ mode, params, fundCode, onShowMissing
       {tot.paid_n < minPaid ? (
         <div className="alert alert-info py-2 small mb-0">
           ต้องมีเคสที่ได้รับเงินอย่างน้อย {minPaid} visit จึงจะเทียบได้ (ตอนนี้มี {int(tot.paid_n)} visit)
-          ลองเลือกช่วงวันที่กว้างขึ้น หรือนำเข้า Statement เพิ่ม
+          ลองเลือกช่วงวันที่กว้างขึ้น หรือนำเข้า REP เพิ่ม
         </div>
       ) : rows.length === 0 ? (
         <p className="muted mb-0">ไม่มีรายการที่พบบ่อยถึงเกณฑ์ในเคสที่ได้รับเงิน</p>

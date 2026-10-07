@@ -152,7 +152,7 @@ export default function ReconOpdPage() {
           <div className="col-sm-6 col-lg-2">
             <label className="form-label" htmlFor="cmp">เทียบยอด HOSxP กับ</label>
             <select id="cmp" className="form-select" value={filters.compare} onChange={setFilter('compare')}>
-              <option value="claim">ยอดเรียกเก็บใน Statement</option>
+              <option value="claim">ยอดเรียกเก็บใน REP</option>
               <option value="compensated">ยอดชดเชยที่ได้รับ</option>
             </select>
           </div>
@@ -231,16 +231,17 @@ export default function ReconOpdPage() {
                 <th>สิทธิ</th>
                 <th className="num">ยอด HOSxP</th>
                 <th className="num">เรียกเก็บ (สปสช.)</th>
-                <th className="num">ชดเชย</th>
                 <th className="num">ผลต่าง</th>
+                <th className="num">ชดเชย</th>
                 <th>REP / TRAN_ID</th>
                 <th>รหัสข้อผิดพลาด</th>
+                <th>รายละเอียดข้อผิดพลาด</th>
               </tr>
             </thead>
             <tbody>
               {result?.rows.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="text-center muted py-4">
+                  <td colSpan={12} className="text-center muted py-4">
                     {grand === 0
                       ? 'ยังไม่มีข้อมูลในช่วงวันที่นี้ นำเข้าไฟล์จาก สปสช. และดึงข้อมูล HOSxP ให้ครบทั้งสองฝั่ง'
                       : 'ไม่พบรายการที่ตรงกับเงื่อนไข'}
@@ -262,14 +263,24 @@ export default function ReconOpdPage() {
                   <td>{r.pttype_name || r.fund || '–'}{r.pdx && <div className="small-id">PDX {r.pdx}</div>}</td>
                   <td className="num">{money(r.uc_money)}</td>
                   <td className="num">{money(r.claim_amount)}</td>
-                  <td className="num">{money(r.compensated)}</td>
                   <td className="num"><Diff value={r.diff} /></td>
+                  <td className="num">{money(r.compensated)}</td>
                   <td>
                     {r.rep_no || '–'}
                     {r.line_count > 1 && <span className="badge text-bg-light border ms-1" title={r.stm_docs}>{r.line_count} รอบ</span>}
                     <div className="small-id">{r.tran_id}</div>
                   </td>
                   <td>{r.error_code ? <span className="text-danger">{r.error_code}</span> : '–'}</td>
+                  <td className="wrap error-detail" style={{ minWidth: 260 }}>
+                    {r.error_detail ? (
+                      <>
+                        {r.error_detail.split('\n').map((line) => <div key={line}>{line}</div>)}
+                        {r.error_guidance && (
+                          <div className="guidance"><i className="bi bi-lightbulb me-1" aria-hidden="true" />{r.error_guidance.split('\n').join(' / ')}</div>
+                        )}
+                      </>
+                    ) : <span className="muted">–</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

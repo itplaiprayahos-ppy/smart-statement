@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { db } from '../config/db.js';
+import { annotateErrors } from './errorCodeService.js';
 
 /**
  * สถานะผลการเปรียบเทียบ
@@ -7,8 +8,8 @@ import { db } from '../config/db.js';
  *  AMOUNT_DIFF  พบทั้งสองฝั่ง แต่ยอดต่างกัน
  *  DENIED       สปสช. ปฏิเสธ / ติด C (มีรหัสข้อผิดพลาด)
  *  MULTIPLE     มาหลายครั้งในวันเดียว ระบบจับคู่ตามลำดับยอดเงินให้ แต่ควรตรวจด้วยคน
- *  NOT_IN_STM   มีใน HOSxP แต่ไม่พบใน Statement
- *  NOT_IN_HIS   มีใน Statement แต่ไม่พบใน HOSxP
+ *  NOT_IN_STM   มีใน HOSxP แต่ไม่พบใน REP
+ *  NOT_IN_HIS   มีใน REP แต่ไม่พบใน HOSxP
  */
 export const STATUSES = ['MATCHED', 'AMOUNT_DIFF', 'DENIED', 'MULTIPLE', 'NOT_IN_STM', 'NOT_IN_HIS'];
 
@@ -32,7 +33,7 @@ export function baseCte(compare) {
            COUNT(*)     OVER (PARTITION BY mkey, vstdate) AS grp_n
     FROM hv
   ),
-  -- รายการจาก Statement: หาคีย์ที่ตรงกับ HOSxP (เลขบัตรก่อน แล้วค่อย HN)
+  -- รายการจาก REP: หาคีย์ที่ตรงกับ HOSxP (เลขบัตรก่อน แล้วค่อย HN)
   nl AS (
     SELECT l.*,
            CASE WHEN c1.c IS NOT NULL THEN l.pid WHEN c2.c IS NOT NULL THEN c2.mkey ELSE l.pid END AS mkey,
@@ -42,7 +43,7 @@ export function baseCte(compare) {
     LEFT JOIN hcount c2 ON c2.mkey = 'HN:' || ltrim(l.hn, '0') AND c2.vstdate = l.service_date
     WHERE l.claim_type = 'OPD' AND l.service_date BETWEEN $1 AND $2
   ),
-  -- รวมรายการหลายรอบ STM เป็นรายการเบิกเดียว
+  -- รวมรายการหลายเลขที่ REP เป็นรายการเบิกเดียว
   --   คนไข้มี visit เดียวในวันนั้น -> รวมทุกรายการของวันนั้น (รวมกรณีส่งใหม่ได้ TRAN_ID ใหม่)
   --   มีหลาย visit หรือไม่พบใน HOSxP -> รวมเฉพาะ TRAN_ID เดียวกันข้ามรอบ
   nk AS (
@@ -168,7 +169,7 @@ export async function reconcileOpd(opts) {
       count: 0, his_amount: 0, claim_amount: 0, compensated: 0,
     }]));
     summary.rows.forEach((r) => { byStatus[r.status] = r; });
-    return { summary: byStatus, total: count.rows[0].total, page, pageSize, rows: rows.rows };
+    return { summary: byStatus, total: count.rows[0].total, page, pageSize, rows: await annotateErrors(rows.rows) };
   });
 }
 
@@ -177,7 +178,7 @@ const STATUS_TH = {
   AMOUNT_DIFF: 'ยอดต่าง',
   DENIED: 'ถูกปฏิเสธ/ติด C',
   MULTIPLE: 'หลายครั้งในวันเดียว (ควรตรวจสอบ)',
-  NOT_IN_STM: 'ไม่พบใน Statement',
+  NOT_IN_STM: 'ไม่พบใน REP',
   NOT_IN_HIS: 'ไม่พบใน HOSxP',
 };
 
@@ -190,7 +191,7 @@ export async function exportOpd(opts) {
     `SELECT * FROM ro r ${filterSql(1)}
      ORDER BY sdate, COALESCE(hn, nhso_hn), vn NULLS LAST LIMIT ${EXPORT_LIMIT}`,
     [opts.status || null, opts.search?.trim() || null],
-  )).rows);
+  )).rows).then(annotateErrors);
 
   const data = rows.map((r) => ({
     'สถานะ': STATUS_TH[r.status],
@@ -206,11 +207,13 @@ export async function exportOpd(opts) {
     'ยอดเรียกเก็บ (HOSxP)': r.uc_money,
     'REP No.': r.rep_no,
     'TRAN_ID': r.tran_id,
-    'รอบ STM': r.stm_docs,
+    'เลขที่ REP': r.stm_docs,
     'ยอดเรียกเก็บ (สปสช.)': r.claim_amount,
-    'ยอดชดเชย': r.compensated,
     'ผลต่าง': r.diff,
+    'ยอดชดเชย': r.compensated,
     'รหัสข้อผิดพลาด': r.error_code,
+    'รายละเอียดข้อผิดพลาด': r.error_detail,
+    'แนวทางแก้ไข': r.error_guidance,
   }));
 
   const ws = XLSX.utils.json_to_sheet(data);

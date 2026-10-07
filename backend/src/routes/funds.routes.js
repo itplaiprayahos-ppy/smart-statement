@@ -4,6 +4,7 @@ import { requireRole } from '../middleware/auth.js';
 import { asyncHandler, HttpError } from '../utils/http.js';
 import { audit } from '../utils/audit.js';
 import { listPttypes, searchItems } from '../services/hosxpService.js';
+import { env } from '../config/env.js';
 
 const router = Router();
 
@@ -31,7 +32,7 @@ router.get('/items/search', requireRole('admin'), asyncHandler(async (req, res) 
 /** สิทธิการรักษาที่ใช้งานอยู่จาก HOSxP (ต้องอยู่ก่อน /:code) */
 router.get('/pttypes', requireRole('admin'), asyncHandler(async (_req, res) => {
   try {
-    res.json(await listPttypes());
+    res.json({ pttypes: await listPttypes(), excludedHipdata: env.excludedHipdata });
   } catch (err) {
     throw new HttpError(502, `อ่านสิทธิการรักษาจาก HOSxP ไม่สำเร็จ: ${err.message}`);
   }
@@ -46,6 +47,15 @@ router.get('/:code', asyncHandler(async (req, res) => {
   );
   res.json({ ...fund, items });
 }));
+
+/** รหัส ICD-10 รับได้ทั้ง "H25.1", "h251", "Z51.5" -> "H251", "Z515" (ใช้เป็นขึ้นต้นด้วย) */
+function readIcd10(v) {
+  const list = (Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/))
+    .map((c) => String(c).trim().toUpperCase().replace(/\./g, '')).filter(Boolean);
+  const bad = list.filter((c) => !/^[A-Z][0-9][0-9A-Z]{0,5}$/.test(c));
+  if (bad.length) throw new HttpError(400, `รหัส ICD-10 ไม่ถูกต้อง: ${bad.join(', ')}`);
+  return [...new Set(list)];
+}
 
 function readFund(body = {}) {
   const code = String(body.code || '').trim().toUpperCase();
@@ -62,6 +72,9 @@ function readFund(body = {}) {
   })).filter((it) => it.icode);
   const pttypes = [...new Set((Array.isArray(body.pttypes) ? body.pttypes : [])
     .map((p) => String(p).trim()).filter(Boolean))];
+  const hipdataCodes = [...new Set((Array.isArray(body.hipdata_codes) ? body.hipdata_codes : ['UCS'])
+    .map((p) => String(p).trim().toUpperCase()).filter(Boolean))];
+  if (hipdataCodes.some((c) => !/^[A-Z0-9_]{1,10}$/.test(c))) throw new HttpError(400, 'รหัสกลุ่มสิทธิไม่ถูกต้อง');
   const pct = (v, d) => {
     if (v === undefined || v === null || v === '') return d;
     const n = Number(v);
@@ -72,7 +85,10 @@ function readFund(body = {}) {
     send: pct(body.target_send, 95), success: pct(body.target_success, 90), complete: pct(body.target_complete, 95),
   };
   return {
-    code, name, cols, items, pttypes, targets,
+    code, name, cols, items, pttypes, hipdataCodes, targets, trackOnly: body.track_only === true,
+    matchMode: body.match_mode === 'rights' ? 'rights' : 'items',
+    icd10Codes: readIcd10(body.icd10_codes),
+    icd10Scope: body.icd10_scope === 'pdx' ? 'pdx' : 'any',
     sort_order: Number.isInteger(Number(body.sort_order)) ? Number(body.sort_order) : 0,
     is_active: body.is_active !== false,
   };
@@ -85,18 +101,22 @@ async function saveFund(req, res, originalCode) {
     if (originalCode) {
       const { rowCount } = await client.query(
         `UPDATE funds SET code = $1, name = $2, stm_columns = $3, sort_order = $4, is_active = $5, pttypes = $7,
-           target_send = $8, target_success = $9, target_complete = $10, updated_at = now()
+           target_send = $8, target_success = $9, target_complete = $10, hipdata_codes = $11, track_only = $12,
+           match_mode = $13, icd10_codes = $14, icd10_scope = $15, updated_at = now()
          WHERE code = $6`,
         [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, originalCode, JSON.stringify(f.pttypes),
-          f.targets.send, f.targets.success, f.targets.complete],
+          f.targets.send, f.targets.success, f.targets.complete, JSON.stringify(f.hipdataCodes), f.trackOnly, f.matchMode,
+          JSON.stringify(f.icd10Codes), f.icd10Scope],
       );
       if (!rowCount) throw new HttpError(404, 'ไม่พบกองทุน');
     } else {
       await client.query(
-        `INSERT INTO funds (code, name, stm_columns, sort_order, is_active, pttypes, target_send, target_success, target_complete)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO funds (code, name, stm_columns, sort_order, is_active, pttypes, target_send, target_success,
+           target_complete, hipdata_codes, track_only, match_mode, icd10_codes, icd10_scope)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, JSON.stringify(f.pttypes),
-          f.targets.send, f.targets.success, f.targets.complete],
+          f.targets.send, f.targets.success, f.targets.complete, JSON.stringify(f.hipdataCodes), f.trackOnly, f.matchMode,
+          JSON.stringify(f.icd10Codes), f.icd10Scope],
       );
     }
     // แทนที่รายการ แต่คงเวลาเพิ่มเดิมไว้ เพื่อให้รู้ว่ารายการไหนเพิ่มใหม่หลังดึง HOSxP
@@ -116,7 +136,7 @@ async function saveFund(req, res, originalCode) {
     throw err;
   });
   await audit(req, originalCode ? 'fund_update' : 'fund_create', {
-    code: saved.code, items: saved.items.length, pttypes: saved.pttypes,
+    code: saved.code, items: saved.items.length, pttypes: saved.pttypes, hipdata_codes: saved.hipdataCodes,
   });
   res.status(originalCode ? 200 : 201).json({ code: saved.code });
 }

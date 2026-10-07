@@ -99,6 +99,18 @@ export async function listPttypes() {
   return rows;
 }
 
+/** รหัสวินิจฉัยทุกตัวของ visit (ovstdiag) ตัดจุดออก diagtype 1 = โรคหลัก */
+const DX_SQL = `
+  SELECT d.vn, upper(replace(d.icd10, '.', '')) AS icd10,
+         MIN(d.diagtype::text) AS diagtype, MIN(v.vstdate)::text AS vstdate
+  FROM ovstdiag d
+  JOIN vn_stat v ON v.vn = d.vn
+  WHERE v.vstdate BETWEEN $1 AND $2
+    AND d.icd10 IS NOT NULL AND trim(d.icd10) <> ''
+  GROUP BY d.vn, upper(replace(d.icd10, '.', ''))
+`;
+const DX_COLS = ['vn', 'icd10', 'diagtype', 'vstdate'];
+
 const ITEM_COLS = ['vn', 'icode', 'vstdate', 'qty', 'sum_price', 'item_name', 'source'];
 
 const COLS = ['vn', 'hn', 'cid', 'ptname', 'vstdate', 'pttype', 'pttype_name', 'hipdata_code', 'pdx', 'income', 'uc_money'];
@@ -168,6 +180,20 @@ async function replaceItems(client, dateFrom, dateTo, items) {
   }
 }
 
+async function replaceDx(client, dateFrom, dateTo, rows) {
+  await client.query('DELETE FROM his_opd_dx WHERE vstdate BETWEEN $1 AND $2', [dateFrom, dateTo]);
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const params = [];
+    const values = chunk.map((r) => `(${DX_COLS.map((c) => { params.push(r[c]); return `$${params.length}`; }).join(',')})`);
+    await client.query(
+      `INSERT INTO his_opd_dx (${DX_COLS.join(',')}) VALUES ${values.join(',')}
+       ON CONFLICT (vn, icd10) DO UPDATE SET diagtype = EXCLUDED.diagtype, vstdate = EXCLUDED.vstdate`,
+      params,
+    );
+  }
+}
+
 export async function pullOpd({ dateFrom, dateTo, userId }) {
   const months = splitByMonth(dateFrom, dateTo);
   let rowCount = 0;
@@ -175,16 +201,19 @@ export async function pullOpd({ dateFrom, dateTo, userId }) {
 
   // icode ทั้งหมดที่ตั้งค่าไว้ในกองทุนที่เปิดใช้งาน
   const { rows: icodeRows } = await db.query(
-    `SELECT DISTINCT fi.icode FROM fund_items fi JOIN funds f ON f.code = fi.fund_code WHERE f.is_active`,
+    `SELECT DISTINCT fi.icode FROM fund_items fi JOIN funds f ON f.code = fi.fund_code
+     WHERE f.is_active AND NOT f.track_only`,
   );
   const icodes = icodeRows.map((r) => r.icode);
 
   for (const [from, to] of months) {
     const { rows: visits } = await hosxp.query(OPD_SQL, [from, to]);
     const items = icodes.length ? (await hosxp.query(ITEMS_SQL, [from, to, icodes])).rows : [];
+    const dx = (await hosxp.query(DX_SQL, [from, to])).rows;
     await withTransaction(async (client) => {
       await replaceSnapshot(client, from, to, visits);
       await replaceItems(client, from, to, items);
+      await replaceDx(client, from, to, dx);
     });
     rowCount += visits.length;
     itemCount += items.length;

@@ -24,6 +24,9 @@ export const env = {
     user: process.env.HOSXP_USER,
     password: process.env.HOSXP_PASSWORD,
   },
+  // กลุ่มสิทธิ (hipdata_code) ที่ไม่นับเข้ากองทุนเสมอ เช่น ชำระเงินเอง คั่นด้วยจุลภาค
+  excludedHipdata: String(process.env.EXCLUDED_HIPDATA ?? 'XXX')
+    .split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z0-9_]{1,10}$/.test(s)),
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresHours: Number(process.env.JWT_EXPIRES_HOURS || 8),
 };

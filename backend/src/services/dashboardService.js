@@ -5,13 +5,13 @@ export const DEFAULT_TARGETS = { send: 95, success: 90, complete: 95 };
 
 /**
  * ตัวชี้วัดการเบิกรายกองทุน
- *  เดือนที่ "ปิดยอดแล้ว" = เดือนที่มีรายการใน Statement ที่นำเข้าแล้ว (Statement มาช้ากว่าวันรับบริการ)
- *  ตัวชี้วัดคิดเฉพาะเดือนที่ปิดยอดแล้ว เดือนที่ยังไม่มี Statement แสดงแยกเป็น "รอผล"
+ *  เดือนที่ "ปิดยอดแล้ว" = เดือนที่มีรายการใน REP ที่นำเข้าแล้ว (REP มาช้ากว่าวันรับบริการ)
+ *  ตัวชี้วัดคิดเฉพาะเดือนที่ปิดยอดแล้ว เดือนที่ยังไม่มี REP แสดงแยกเป็น "รอผล"
  *
- *  อัตราการส่งเบิก     = visit ที่เข้าเกณฑ์และพบใน Statement ÷ visit ที่เข้าเกณฑ์
- *  อัตราเคลมสำเร็จ     = ได้รับเงิน ÷ ที่พบใน Statement
+ *  อัตราการส่งเบิก     = visit ที่เข้าเกณฑ์และพบใน REP ÷ visit ที่เข้าเกณฑ์
+ *  อัตราเคลมสำเร็จ     = ได้รับเงิน ÷ ที่พบใน REP
  *  ความครบถ้วนของข้อมูล = visit ที่มีเลขบัตร 13 หลัก มี PDX และไม่ขาดรายการจำเป็น ÷ visit ที่เข้าเกณฑ์
- *  ยอดเบิกได้          = ยอดกองทุนจาก Statement ทุกเดือน (รวมที่ได้รับแต่ไม่เข้าเกณฑ์)
+ *  ยอดเบิกได้          = ยอดกองทุนจาก REP ทุกเดือน (รวมที่ได้รับแต่ไม่เข้าเกณฑ์)
  */
 const KPI_CTE = `
   WITH closed_m AS (
@@ -21,7 +21,7 @@ const KPI_CTE = `
   e AS (
     SELECT fy.*,
            to_char(fy.sdate, 'YYYY-MM') AS month,
-           fy.fund_status <> 'EXTRA_PAID' AS elig,
+           fy.fund_status NOT IN ('EXTRA_PAID', 'RECEIVED') AS elig,
            (fy.cid IS NULL OR fy.cid !~ '^[0-9]{13}$' OR COALESCE(TRIM(fy.pdx), '') = ''
              OR fy.missing_required IS NOT NULL) AS has_issue,
            to_char(fy.sdate, 'YYYY-MM') IN (SELECT month FROM closed_m) AS closed
@@ -38,7 +38,8 @@ const KPI_COLUMNS = `
   COALESCE(SUM(his_fund_amount) FILTER (WHERE elig AND NOT closed), 0) AS pending_amount,
   COALESCE(SUM(his_fund_amount) FILTER (WHERE elig), 0) AS his_amount,
   COALESCE(SUM(stm_fund_amount), 0) AS stm_amount,
-  COUNT(DISTINCT COALESCE(cid, hn)) FILTER (WHERE elig)::int AS patients`;
+  COUNT(DISTINCT COALESCE(cid, hn)) FILTER (WHERE elig)::int AS patients,
+  COUNT(*) FILTER (WHERE fund_status = 'RECEIVED')::int AS received`;
 
 // ---------- cache: ผลเดิมใช้ซ้ำได้จนกว่าจะมีการนำเข้า ดึงข้อมูล หรือแก้การตั้งค่ากองทุน ----------
 const cache = new Map();
@@ -63,7 +64,7 @@ export async function fundKpis({ dateFrom, dateTo }) {
   const data = await withFundTable({ dateFrom, dateTo, fund: null, fundCode: null, onlyClaimable: false }, async (c) => {
     const p = [dateFrom, dateTo];
     const funds = await c.query(`
-      SELECT f.code, f.name, f.sort_order, f.target_send, f.target_success, f.target_complete,
+      SELECT f.code, f.name, f.sort_order, f.target_send, f.target_success, f.target_complete, f.track_only, f.match_mode,
              COUNT(fi.icode)::int AS item_count,
              (SELECT string_agg(COALESCE(u.full_name, u.username), ', ' ORDER BY u.username)
                 FROM users u WHERE u.is_active AND u.fund_codes ? f.code) AS responsible

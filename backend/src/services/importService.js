@@ -12,10 +12,10 @@ export async function saveImport({ fileName, profile, parsed, userId }) {
   return withTransaction(async (client) => {
     const { rows: [batch] } = await client.query(
       `INSERT INTO import_batches (file_name, claim_type, mapping_id, total_rows, error_rows, errors, imported_by,
-         stm_doc, stm_period)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+         stm_doc, stm_period, file_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
       [fileName, profile.claim_type, profile.id, parsed.totalRows, parsed.errorCount,
-        JSON.stringify(parsed.errors), userId, parsed.stmDoc, parsed.stmPeriod],
+        JSON.stringify(parsed.errors), userId, parsed.stmDoc, parsed.stmPeriod, profile.file_type || 'REP'],
     );
 
     let inserted = 0;

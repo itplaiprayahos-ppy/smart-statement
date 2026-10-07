@@ -1,16 +1,20 @@
 import * as XLSX from 'xlsx';
 import { db } from '../config/db.js';
+import { env } from '../config/env.js';
 import { baseCte, baseParams } from './reconService.js';
 
 /**
  * สถานะการเบิกรายกองทุน
- *  PAID        เข้าเกณฑ์ ส่งเบิกแล้ว และได้รับเงินกองทุนนี้ (ยอดสุทธิทุกรอบ STM > 0)
- *  NOT_PAID    เข้าเกณฑ์ พบใน Statement แต่ยอดสุทธิของกองทุนนี้เป็น 0 หรือติดลบ
+ *  PAID        เข้าเกณฑ์ ส่งเบิกแล้ว และได้รับเงินกองทุนนี้ (ยอดสุทธิทุกเลขที่ REP > 0)
+ *  NOT_PAID    เข้าเกณฑ์ พบใน REP แต่ยอดสุทธิของกองทุนนี้เป็น 0 หรือติดลบ
  *  DENIED      เข้าเกณฑ์ แต่ สปสช. ปฏิเสธ / ติด C (ตามรอบล่าสุด)
- *  NOT_SENT    เข้าเกณฑ์ แต่ไม่พบใน Statement
+ *  NOT_SENT    เข้าเกณฑ์ แต่ไม่พบใน REP
  *  EXTRA_PAID  (ตรวจย้อนกลับ) ได้รับเงินกองทุนนี้ แต่ไม่เข้าเกณฑ์ตามการตั้งค่า
+ *  RECEIVED    ยอดที่ได้รับของกองทุนแบบติดตามยอดรับ (FS, DRUG) ไม่มีเกณฑ์คัด visit
  */
-export const FUND_STATUSES = ['PAID', 'NOT_PAID', 'DENIED', 'NOT_SENT', 'EXTRA_PAID'];
+export const FUND_STATUSES = ['PAID', 'NOT_PAID', 'DENIED', 'NOT_SENT', 'EXTRA_PAID', 'RECEIVED'];
+/** สถานะของ visit ที่เข้าเกณฑ์ (ไม่รวมผลตรวจย้อนกลับ และยอดรับของกองทุนติดตามยอดรับ) */
+export const ELIGIBLE = "fund_status NOT IN ('EXTRA_PAID', 'RECEIVED')";
 const FAILED = "('NOT_SENT', 'DENIED', 'NOT_PAID')";
 
 /** เกณฑ์รายการที่พบบ่อยในเคสสำเร็จ: ต้องมีเคสได้รับเงินอย่างน้อย MIN_PAID visit และพบใน >= COMMON_RATE ของเคสเหล่านั้น */
@@ -18,27 +22,65 @@ export const MIN_PAID = 5;
 export const COMMON_RATE = 0.6;
 
 /**
- * ต่อจาก CTE ของการกระทบยอด OPD (r = ผลจับคู่ visit กับรายการเบิกที่รวมทุกรอบ STM แล้ว)
+ * ต่อจาก CTE ของการกระทบยอด OPD (r = ผลจับคู่ visit กับรายการเบิกที่รวมทุกเลขที่ REP แล้ว)
  *  fv    = visit ที่เข้าเกณฑ์กองทุน: มีรายการที่ตั้งค่าอย่างน้อย 1 รายการ และสิทธิตรงเงื่อนไข (ถ้ากำหนด)
  *  elig  = visit ที่เข้าเกณฑ์ + สถานะเบิกของกองทุนนั้น
- *  extra = Statement จ่ายเงินกองทุน แต่ visit ไม่เข้าเกณฑ์ (ตรวจย้อนกลับ)
+ *  extra = REP จ่ายเงินกองทุน แต่ visit ไม่เข้าเกณฑ์ (ตรวจย้อนกลับ)
  * พารามิเตอร์ $1-$4 จาก baseParams, $5 = รหัสกองทุน (null = ทุกกองทุน)
  */
+/** กลุ่มสิทธิที่ไม่นับเข้ากองทุน (ตรวจรูปแบบแล้วใน env.js จึงฝังใน SQL ได้อย่างปลอดภัย) */
+const EXCLUDED_SQL = env.excludedHipdata.length
+  ? `AND COALESCE(v.hipdata_code, '') NOT IN (${env.excludedHipdata.map((c) => `'${c}'`).join(', ')})`
+  : '';
+
+/** เงื่อนไขสิทธิของ visit (v) ตามการตั้งค่ากองทุน (f) */
+const RIGHTS_OK = `
+  CASE
+    WHEN jsonb_array_length(f.pttypes) > 0 THEN f.pttypes ? v.pttype
+    WHEN jsonb_array_length(f.hipdata_codes) > 0 THEN f.hipdata_codes ? COALESCE(v.hipdata_code, '')
+    ELSE TRUE
+  END`;
+
+/** เงื่อนไขรหัสโรค (ICD-10) ของกองทุน: ว่าง = ไม่กรอง, ขึ้นต้นด้วยรหัสที่กำหนด */
+const ICD_OK = `
+  (jsonb_array_length(f.icd10_codes) = 0
+   OR (f.icd10_scope = 'pdx' AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements_text(f.icd10_codes) c
+         WHERE upper(replace(COALESCE(v.pdx, ''), '.', '')) LIKE c.value || '%'))
+   OR (f.icd10_scope = 'any' AND EXISTS (
+         SELECT 1 FROM his_opd_dx d, jsonb_array_elements_text(f.icd10_codes) c
+         WHERE d.vn = v.vn AND d.icd10 LIKE c.value || '%')))`;
+
 function fundCte() {
   return `${baseCte('claim')},
+  -- visit ที่เข้าเกณฑ์กองทุน
+  --   match_mode = items : มีรายการที่ตั้งค่าอย่างน้อย 1 รายการ และสิทธิตรงเงื่อนไข
+  --   match_mode = rights: ทุก visit ของสิทธิที่ตั้งค่า ที่มียอดเรียกเก็บ (ยอดตั้งเบิก = uc_money ของ visit)
   fv AS MATERIALIZED (
     SELECT i.vn, fi.fund_code,
            SUM(i.sum_price) AS his_fund_amount,
            string_agg(DISTINCT COALESCE(fi.item_name, i.icode), ', ') AS items,
-           array_agg(DISTINCT i.icode) AS icodes
+           array_agg(DISTINCT i.icode::text) AS icodes
     FROM his_opd_items i
     JOIN his_opd_visits v ON v.vn = i.vn
     JOIN fund_items fi ON fi.icode = i.icode
-    JOIN funds f ON f.code = fi.fund_code AND f.is_active
+    JOIN funds f ON f.code = fi.fund_code AND f.is_active AND NOT f.track_only AND f.match_mode = 'items'
     WHERE i.vstdate BETWEEN $1 AND $2
-      AND (jsonb_array_length(f.pttypes) = 0 OR f.pttypes ? v.pttype)
+      AND ${RIGHTS_OK}
+      AND ${ICD_OK}
+      ${EXCLUDED_SQL}
       AND ($5::text IS NULL OR fi.fund_code = $5)
     GROUP BY i.vn, fi.fund_code
+    UNION ALL
+    SELECT v.vn, f.code, v.uc_money, 'ทุก visit ของสิทธิที่ตั้งค่า', ARRAY[]::text[]
+    FROM his_opd_visits v
+    JOIN funds f ON f.is_active AND NOT f.track_only AND f.match_mode = 'rights'
+    WHERE v.vstdate BETWEEN $1 AND $2
+      AND COALESCE(v.uc_money, 0) > 0
+      AND ${RIGHTS_OK}
+      AND ${ICD_OK}
+      ${EXCLUDED_SQL}
+      AND ($5::text IS NULL OR f.code = $5)
   ),
   elig AS (
     SELECT fv.fund_code, fv.items, array_to_string(fv.icodes, ', ') AS item_codes,
@@ -63,10 +105,12 @@ function fundCte() {
   extra AS (
     SELECT kv.key AS fund_code,
            CASE
+             WHEN f.track_only THEN 'ติดตามยอดรับ'
              WHEN r.vn IS NULL THEN 'ไม่พบ visit ใน HOSxP'
+             WHEN f.match_mode = 'rights' THEN 'สิทธิหรือรหัสโรคไม่อยู่ในเงื่อนไขกองทุน หรือไม่มียอดเรียกเก็บใน HOSxP'
              WHEN EXISTS (SELECT 1 FROM his_opd_items i JOIN fund_items fi ON fi.icode = i.icode
                           WHERE i.vn = r.vn AND fi.fund_code = kv.key)
-               THEN 'สิทธิไม่อยู่ในเงื่อนไขกองทุน'
+               THEN 'สิทธิหรือรหัสโรคไม่อยู่ในเงื่อนไขกองทุน'
              ELSE 'ไม่มีรายการที่ตั้งค่าไว้'
            END AS items,
            NULL::text AS item_codes,
@@ -77,7 +121,7 @@ function fundCte() {
            r.pdx, r.uc_money,
            r.line_id, r.rep_no, r.tran_id, r.stm_docs, r.error_code,
            kv.value::numeric AS stm_fund_amount,
-           'EXTRA_PAID' AS fund_status
+           CASE WHEN f.track_only THEN 'RECEIVED' ELSE 'EXTRA_PAID' END AS fund_status
     FROM r
     CROSS JOIN LATERAL jsonb_each_text(r.fund_amounts) AS kv
     JOIN funds f ON f.code = kv.key AND f.is_active
@@ -99,7 +143,7 @@ function fundCte() {
  */
 function analysisCte(src) {
   return `
-  vstat AS MATERIALIZED (SELECT DISTINCT fund_code, vn, fund_status FROM ${src} WHERE fund_status <> 'EXTRA_PAID'),
+  vstat AS MATERIALIZED (SELECT DISTINCT fund_code, vn, fund_status FROM ${src} WHERE ${ELIGIBLE}),
   ftot AS (
     SELECT fund_code,
            COUNT(*) FILTER (WHERE fund_status = 'PAID')::int AS paid_n,
@@ -167,7 +211,6 @@ const DETAIL_WHERE = `
          OR ($4 = 'common' AND missing_common IS NOT NULL))`;
 const detailParams = (o) => [o.fundCode || null, o.fundStatus || null, o.search?.trim() || null, o.missing || null];
 
-const ELIGIBLE = "fund_status <> 'EXTRA_PAID'";
 const PERSON = 'COALESCE(cid, hn)';
 
 /**
@@ -201,7 +244,8 @@ export async function reconcileFunds(opts) {
   return withFundTable({ ...opts, fundCode: null }, async (c) => {
     const dp = detailParams(opts);
     const funds = await c.query(`
-      SELECT f.code, f.name, f.pttypes, COUNT(fi.icode)::int AS item_count
+      SELECT f.code, f.name, f.pttypes, f.hipdata_codes, f.track_only, f.match_mode,
+             COUNT(fi.icode)::int AS item_count
       FROM funds f LEFT JOIN fund_items fi ON fi.fund_code = f.code
       WHERE f.is_active GROUP BY f.code ORDER BY f.sort_order, f.code`);
     const byStatus = await c.query(`
@@ -227,7 +271,8 @@ export async function reconcileFunds(opts) {
              COUNT(*) FILTER (WHERE fund_status = 'NOT_SENT')::int AS not_sent,
              COALESCE(SUM(his_fund_amount) FILTER (WHERE fund_status = 'NOT_SENT'), 0) AS not_sent_amount,
              COUNT(*) FILTER (WHERE fund_status = 'EXTRA_PAID')::int AS extra_paid,
-             COALESCE(SUM(stm_fund_amount) FILTER (WHERE fund_status = 'EXTRA_PAID'), 0) AS extra_paid_amount
+             COALESCE(SUM(stm_fund_amount) FILTER (WHERE fund_status = 'EXTRA_PAID'), 0) AS extra_paid_amount,
+             COALESCE(SUM(stm_fund_amount) FILTER (WHERE fund_status = 'RECEIVED'), 0) AS received_amount
       FROM fy WHERE ($1::text IS NULL OR fund_code = $1)
       GROUP BY 1 ORDER BY 1`, [opts.fundCode || null]);
     const count = await c.query(`SELECT COUNT(*)::int AS total FROM fy ${DETAIL_WHERE}`, dp);
@@ -303,8 +348,9 @@ const STATUS_TH = {
   PAID: 'ได้รับเงิน',
   NOT_PAID: 'ไม่ได้รับเงินกองทุนนี้',
   DENIED: 'ถูกปฏิเสธ/ติด C',
-  NOT_SENT: 'ไม่พบใน Statement',
+  NOT_SENT: 'ไม่พบใน REP',
   EXTRA_PAID: 'ได้รับเงินแต่ไม่เข้าเกณฑ์',
+  RECEIVED: 'ได้รับเงิน (ติดตามยอดรับ)',
 };
 
 export async function exportFunds(opts) {
@@ -332,7 +378,7 @@ export async function exportFunds(opts) {
       ? null : Math.round((r.stm_fund_amount - r.his_fund_amount) * 100) / 100,
     'REP No.': r.rep_no,
     'TRAN_ID': r.tran_id,
-    'รอบ STM': r.stm_docs,
+    'เลขที่ REP': r.stm_docs,
     'รหัสข้อผิดพลาด': r.error_code,
   }));
   const ws = XLSX.utils.json_to_sheet(data);

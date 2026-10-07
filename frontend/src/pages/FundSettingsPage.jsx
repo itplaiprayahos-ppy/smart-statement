@@ -6,59 +6,147 @@ import { money } from '../utils/format.js';
 const SOURCE_LABEL = { nondrug: 'ค่าบริการ', drug: 'ยา' };
 const blankFund = () => ({
   originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], pttypes: [],
-  target_send: 95, target_success: 90, target_complete: 95,
+  hipdata_codes: ['UCS'], target_send: 95, target_success: 90, target_complete: 95, track_only: false,
+  match_mode: 'items', icd10Text: '', icd10_scope: 'any',
 });
 
-/** เลือกสิทธิการรักษาของ HOSxP ที่เข้าเงื่อนไขกองทุน (ไม่เลือก = ทุกสิทธิ) */
-function PttypePicker({ list, error, value, onChange }) {
+/** "H25.1, z515" -> ["H251", "Z515"] */
+const parseIcd = (text) => [...new Set(String(text || '').split(/[\s,;]+/)
+  .map((c) => c.trim().toUpperCase().replace(/\./g, '')).filter(Boolean))];
+
+/**
+ * สิทธิการรักษาที่เข้าเงื่อนไขกองทุน มี 2 แบบ (เลือกอย่างใดอย่างหนึ่ง)
+ *  - ตามกลุ่มสิทธิ (hipdata_code): ตารางแสดงเฉพาะรหัสสิทธิในกลุ่มที่เลือก เพื่อให้เห็นว่านับสิทธิอะไรบ้าง
+ *  - เลือกรหัสสิทธิเอง (pttype): ติ๊กรายตัว
+ */
+function PttypePicker({ list, error, value, onChange, groups, onGroupsChange, excluded }) {
   const [filter, setFilter] = useState('');
+  const [manualRequested, setManualRequested] = useState(false);
+  const mode = value.length > 0 || manualRequested ? 'manual' : 'groups';
   const selected = new Set(value);
   const known = new Set(list.map((p) => p.pttype));
-  const shown = list.filter((p) => {
-    const q = filter.trim().toLowerCase();
-    return !q || p.pttype.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)
-      || (p.hipdata_code || '').toLowerCase() === q;
-  });
+  const allGroups = [...new Set(list.map((p) => p.hipdata_code || ''))].filter(Boolean).sort();
+  const groupCount = (g) => list.filter((p) => p.hipdata_code === g).length;
+  const usable = (p) => !excluded.includes(p.hipdata_code);
+
+  const toGroups = async () => {
+    if (value.length && !(await confirmAction({
+      title: 'เปลี่ยนเป็นเลือกตามกลุ่มสิทธิ?', text: `รหัสสิทธิที่ติ๊กไว้ ${value.length} รหัสจะถูกล้าง`, confirmText: 'เปลี่ยน',
+    }))) return;
+    onChange([]);
+    setManualRequested(false);
+  };
+  const toManual = () => {
+    // เริ่มจากรหัสสิทธิในกลุ่มที่เลือกอยู่ แล้วค่อยติ๊กออกเฉพาะที่ไม่ต้องการ
+    onChange(list.filter((p) => groups.includes(p.hipdata_code) && usable(p)).map((p) => p.pttype));
+    setManualRequested(true);
+  };
+
+  const q = filter.trim().toLowerCase();
+  const matchText = (p) => !q || p.pttype.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)
+    || (p.hipdata_code || '').toLowerCase() === q;
+  const rows = mode === 'groups'
+    ? list.filter((p) => groups.includes(p.hipdata_code) && usable(p) && matchText(p))
+    : list.filter(matchText);
+  const groupTotal = list.filter((p) => groups.includes(p.hipdata_code) && usable(p)).length;
   const toggle = (code) => onChange(selected.has(code) ? value.filter((c) => c !== code) : [...value, code]);
+  const summary = mode === 'manual'
+    ? `เลือกเอง ${value.length} รหัสสิทธิ`
+    : groups.length ? `กลุ่ม ${groups.join(', ')} รวม ${groupTotal} รหัสสิทธิ` : 'ทุกสิทธิ';
 
   return (
     <div className="panel">
-      <div className="panel-title mb-1">สิทธิการรักษาที่เข้าเงื่อนไข ({value.length ? `${value.length} สิทธิ` : 'ทุกสิทธิ'})</div>
-      <p className="small muted">visit ต้องมีสิทธิตามที่เลือกจึงจะนับเข้ากองทุนนี้ ถ้าไม่เลือกเลยจะนับทุกสิทธิ แสดงเฉพาะสิทธิที่ใช้งานอยู่ใน HOSxP</p>
+      <div className="panel-title mb-2">สิทธิการรักษาที่เข้าเงื่อนไข ({summary})</div>
       {error && <div className="alert alert-warning py-2 small">{error}</div>}
-      {value.filter((c) => !known.has(c)).length > 0 && list.length > 0 && (
+
+      <div className="btn-group btn-group-sm mb-2" role="radiogroup" aria-label="วิธีเลือกสิทธิ">
+        <button type="button" className={`btn ${mode === 'groups' ? 'btn-primary' : 'btn-outline-primary'}`}
+          aria-pressed={mode === 'groups'} onClick={mode === 'groups' ? undefined : toGroups}>
+          ตามกลุ่มสิทธิ (แนะนำ)
+        </button>
+        <button type="button" className={`btn ${mode === 'manual' ? 'btn-primary' : 'btn-outline-primary'}`}
+          aria-pressed={mode === 'manual'} onClick={mode === 'manual' ? undefined : toManual}>
+          เลือกรหัสสิทธิเอง
+        </button>
+      </div>
+
+      {mode === 'groups' ? (
+        <>
+          <p className="small muted mb-2">
+            นับทุกรหัสสิทธิในกลุ่มที่เลือก รวมรหัสที่เพิ่มใหม่ใน HOSxP ภายหลัง ตารางด้านล่างแสดงรหัสสิทธิที่จะถูกนับ
+          </p>
+          <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
+            {allGroups.map((g) => {
+              const isExcluded = excluded.includes(g);
+              const on = groups.includes(g) && !isExcluded;
+              return (
+                <button key={g} type="button" disabled={isExcluded} className={`chip ${on ? 'active' : ''}`}
+                  onClick={() => onGroupsChange(on ? groups.filter((x) => x !== g) : [...groups, g])} aria-pressed={on}
+                  title={isExcluded ? 'ไม่นับเข้ากองทุนเสมอ (EXCLUDED_HIPDATA)' : `${groupCount(g)} รหัสสิทธิ`}>
+                  {g} <span className="opacity-75">({groupCount(g)})</span>
+                  {isExcluded && <i className="bi bi-slash-circle ms-1" aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </div>
+          {groups.length === 0 && <div className="small text-warning-emphasis mb-2">ยังไม่ได้เลือกกลุ่ม: นับทุกสิทธิ (ยกเว้นกลุ่มที่ไม่นับเสมอ)</div>}
+        </>
+      ) : (
+        <p className="small muted mb-2">ติ๊กเฉพาะรหัสสิทธิที่ต้องการ รหัสที่เพิ่มใหม่ใน HOSxP ภายหลังจะไม่ถูกนับจนกว่าจะมาติ๊กเพิ่ม</p>
+      )}
+
+      {excluded.length > 0 && (
+        <p className="small muted mb-2">
+          <i className="bi bi-slash-circle me-1" />
+          กลุ่ม {excluded.join(', ')} ไม่นับเข้ากองทุนใดเสมอ (เช่น ชำระเงินเอง) ตั้งค่าได้ที่ EXCLUDED_HIPDATA ในไฟล์ .env
+        </p>
+      )}
+      {mode === 'manual' && value.filter((c) => !known.has(c)).length > 0 && list.length > 0 && (
         <div className="small text-warning-emphasis mb-2">
-          สิทธิที่เลือกไว้แต่ไม่พบหรือเลิกใช้แล้วใน HOSxP: {value.filter((c) => !known.has(c)).join(', ')}{' '}
+          รหัสที่เลือกไว้แต่ไม่พบหรือเลิกใช้แล้วใน HOSxP: {value.filter((c) => !known.has(c)).join(', ')}{' '}
           <button type="button" className="btn btn-link btn-sm p-0 align-baseline" onClick={() => onChange(value.filter((c) => known.has(c)))}>นำออก</button>
         </div>
       )}
+
       <div className="d-flex gap-2 mb-2">
-        <input className="form-control form-control-sm" placeholder="ค้นหารหัส ชื่อสิทธิ หรือกลุ่ม เช่น UCS" value={filter}
+        <input className="form-control form-control-sm" placeholder="ค้นหารหัส ชื่อสิทธิ หรือกลุ่ม" value={filter}
           onChange={(e) => setFilter(e.target.value)} aria-label="ค้นหาสิทธิ" />
-        <button type="button" className="btn btn-sm btn-outline-primary text-nowrap"
-          onClick={() => onChange([...new Set([...value, ...shown.map((p) => p.pttype)])])} disabled={!shown.length}>
-          เลือกที่แสดงทั้งหมด
-        </button>
-        <button type="button" className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => onChange([])} disabled={!value.length}>
-          ล้าง
-        </button>
+        {mode === 'manual' && (
+          <>
+            <button type="button" className="btn btn-sm btn-outline-primary text-nowrap"
+              onClick={() => onChange([...new Set([...value, ...rows.filter(usable).map((p) => p.pttype)])])} disabled={!rows.length}>
+              เลือกที่แสดงทั้งหมด
+            </button>
+            <button type="button" className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => onChange([])} disabled={!value.length}>
+              ล้าง
+            </button>
+          </>
+        )}
       </div>
       <div className="scroll-box">
         <table className="table table-sm table-hover data-table">
-          <thead><tr><th /><th>รหัส</th><th>ชื่อสิทธิ</th><th>กลุ่ม</th></tr></thead>
+          <thead><tr>{mode === 'manual' && <th />}<th>รหัส</th><th>ชื่อสิทธิ</th><th>กลุ่ม</th></tr></thead>
           <tbody>
-            {shown.map((p) => (
-              <tr key={p.pttype} onClick={() => toggle(p.pttype)} style={{ cursor: 'pointer' }}>
-                <td style={{ width: 36 }}>
-                  <input type="checkbox" className="form-check-input" checked={selected.has(p.pttype)} readOnly
-                    aria-label={`เลือกสิทธิ ${p.pttype} ${p.name}`} />
-                </td>
+            {rows.map((p) => (
+              <tr key={p.pttype} onClick={mode === 'manual' && usable(p) ? () => toggle(p.pttype) : undefined}
+                style={mode === 'manual' && usable(p) ? { cursor: 'pointer' } : undefined}
+                className={usable(p) ? '' : 'muted'}>
+                {mode === 'manual' && (
+                  <td style={{ width: 36 }}>
+                    <input type="checkbox" className="form-check-input" checked={selected.has(p.pttype)} readOnly
+                      disabled={!usable(p)} aria-label={`เลือกสิทธิ ${p.pttype} ${p.name}`} />
+                  </td>
+                )}
                 <td style={{ width: 60 }}>{p.pttype}</td>
                 <td className="wrap">{p.name}</td>
                 <td className="small-id">{p.hipdata_code}</td>
               </tr>
             ))}
-            {shown.length === 0 && <tr><td colSpan={4} className="muted text-center py-3">ไม่พบสิทธิ</td></tr>}
+            {rows.length === 0 && (
+              <tr><td colSpan={4} className="muted text-center py-3">
+                {mode === 'groups' && !groups.length ? 'เลือกกลุ่มสิทธิด้านบนเพื่อดูรหัสสิทธิที่จะถูกนับ' : 'ไม่พบสิทธิ'}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -76,13 +164,14 @@ export default function FundSettingsPage() {
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
   const [pttypeList, setPttypeList] = useState([]);
+  const [excludedHipdata, setExcludedHipdata] = useState([]);
   const [pttypeError, setPttypeError] = useState('');
 
   const loadList = useCallback(() => api.get('/funds').then((r) => setFunds(r.data)).catch(showError), []);
   useEffect(() => { loadList(); }, [loadList]);
   useEffect(() => {
     api.get('/funds/pttypes')
-      .then((r) => setPttypeList(r.data))
+      .then((r) => { setPttypeList(r.data.pttypes); setExcludedHipdata(r.data.excludedHipdata || []); })
       .catch((err) => setPttypeError(err?.response?.data?.message || 'อ่านรายการสิทธิจาก HOSxP ไม่สำเร็จ'));
   }, []);
 
@@ -100,6 +189,11 @@ export default function FundSettingsPage() {
         originalCode: data.code, code: data.code, name: data.name, sort_order: data.sort_order,
         is_active: data.is_active, columnsText: (data.stm_columns || []).join('\n'), items: data.items,
         pttypes: data.pttypes || [],
+        hipdata_codes: data.hipdata_codes || [],
+        track_only: !!data.track_only,
+        match_mode: data.match_mode || 'items',
+        icd10Text: (data.icd10_codes || []).join(', '),
+        icd10_scope: data.icd10_scope || 'any',
         target_send: Number(data.target_send), target_success: Number(data.target_success),
         target_complete: Number(data.target_complete),
       });
@@ -143,6 +237,11 @@ export default function FundSettingsPage() {
       stm_columns: form.columnsText.split('\n').map((s) => s.trim()).filter(Boolean),
       items: form.items,
       pttypes: form.pttypes,
+      hipdata_codes: form.hipdata_codes,
+      track_only: form.track_only,
+      match_mode: form.match_mode,
+      icd10_codes: parseIcd(form.icd10Text),
+      icd10_scope: form.icd10_scope,
       target_send: form.target_send, target_success: form.target_success, target_complete: form.target_complete,
     };
     setBusy(true);
@@ -184,7 +283,7 @@ export default function FundSettingsPage() {
       <div className="page-head">
         <div>
           <h1>ตั้งค่ากองทุน</h1>
-          <p>visit จะนับเข้ากองทุนเมื่อมีรายการค่าบริการหรือยาที่ตั้งไว้อย่างน้อย 1 รายการ และสิทธิการรักษาตรงตามที่เลือก</p>
+          <p>visit จะนับเข้ากองทุนเมื่อมีรายการค่าบริการหรือยาที่ตั้งไว้อย่างน้อย 1 รายการ และสิทธิการรักษาอยู่ในกลุ่มหรือรหัสที่เลือก</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => open(null)}>
           <i className="bi bi-plus-lg me-1" />เพิ่มกองทุน
@@ -200,12 +299,16 @@ export default function FundSettingsPage() {
                 onClick={() => open(f.code)}>
                 <div className="d-flex justify-content-between">
                   <strong>{f.code}</strong>
-                  <span className={f.item_count ? 'small muted' : 'small text-warning-emphasis'}>
-                    {f.item_count ? `${f.item_count} รายการ` : 'ยังไม่มีรายการ'}
+                  <span className={f.item_count || f.track_only || f.match_mode === 'rights' ? 'small muted' : 'small text-warning-emphasis'}>
+                    {f.track_only ? 'ติดตามยอดรับ' : f.match_mode === 'rights' ? 'คัดตามสิทธิ' : f.item_count ? `${f.item_count} รายการ` : 'ยังไม่มีรายการ'}
                   </span>
                 </div>
                 <div className="small">{f.name}{!f.is_active && <span className="muted"> (ปิดใช้งาน)</span>}</div>
-                <div className="small-id">{f.pttypes?.length ? `สิทธิ ${f.pttypes.join(', ')}` : 'ทุกสิทธิ'}</div>
+                {!f.track_only && (
+                  <div className="small-id">
+                    {f.pttypes?.length ? `สิทธิ ${f.pttypes.join(', ')}` : f.hipdata_codes?.length ? `กลุ่ม ${f.hipdata_codes.join(', ')}` : 'ทุกสิทธิ'}
+                  </div>
+                )}
               </button>
             ))}
           </div>
@@ -235,11 +338,12 @@ export default function FundSettingsPage() {
                     <textarea id="fs-cols" className="form-control" rows={2} value={form.columnsText}
                       onChange={(e) => update({ columnsText: e.target.value })} placeholder="เช่น HC" />
                     <div className="form-text">
-                      ใส่ชื่อกองทุนตามหัวตารางแถวที่ 13 ของไฟล์ REP เช่น HC, AE, INST, DMIS, PP บรรทัดละ 1 ชื่อ
-                      ระบบรวมทุกคอลัมน์ย่อยใต้ชื่อนั้นให้ (HC = HC + DRUG) ยกเว้นกลุ่มที่มี “ยอดชดเชยที่จ่ายจริง” จะใช้เฉพาะคอลัมน์นั้น
-                      ถ้าต้องการคอลัมน์เดียว ใส่ชื่อเต็มแบบ “กลุ่ม / คอลัมน์ย่อย” นำเข้าไฟล์ใหม่ทุกครั้งหลังแก้
+                      ใส่ชื่อคอลัมน์ตามหัวตารางของไฟล์ REP (ชีต Detail) บรรทัดละ 1 ชื่อ หลายบรรทัดระบบรวมยอดให้
+                      เขียนแบบ “กลุ่ม / คอลัมน์ย่อย” เช่น ค่าใช้จ่ายสูง (HC) / OPHC ถ้าใส่เฉพาะหัวกลุ่ม ระบบรวมทุกคอลัมน์ย่อยใต้กลุ่มนั้น
+                      คัดลอกชื่อที่ถูกต้องได้จาก “หัวคอลัมน์ทั้งหมดในไฟล์” ในหน้าตรวจไฟล์ นำเข้าไฟล์ใหม่ทุกครั้งหลังแก้
                     </div>
                   </div>
+                  {!form.track_only && (
                   <div className="col-12">
                     <div className="form-label mb-1">เป้าหมายตัวชี้วัด (%) ใช้แสดงสีในแดชบอร์ดภาพรวม</div>
                     <div className="row g-2">
@@ -255,7 +359,15 @@ export default function FundSettingsPage() {
                       ))}
                     </div>
                   </div>
+                  )}
                   <div className="col-12">
+                    <div className="form-check mb-1">
+                      <input id="fs-track" type="checkbox" className="form-check-input" checked={form.track_only}
+                        onChange={(e) => update({ track_only: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="fs-track">
+                        ติดตามยอดรับอย่างเดียว <span className="small muted">(ไม่ต้องตั้งรายการและสิทธิ นับเฉพาะยอดที่ได้รับจาก REP เช่น FS, DRUG)</span>
+                      </label>
+                    </div>
                     <div className="form-check">
                       <input id="fs-active" type="checkbox" className="form-check-input" checked={form.is_active} onChange={(e) => update({ is_active: e.target.checked })} />
                       <label className="form-check-label" htmlFor="fs-active">เปิดใช้งานกองทุนนี้</label>
@@ -264,8 +376,55 @@ export default function FundSettingsPage() {
                 </div>
               </div>
 
-              <PttypePicker list={pttypeList} error={pttypeError} value={form.pttypes} onChange={(pttypes) => update({ pttypes })} />
+              {!form.track_only && (<>
+              <div className="panel">
+                <div className="panel-title mb-2">วิธีคัด visit เข้ากองทุน</div>
+                <div className="d-flex flex-column gap-1">
+                  {[
+                    ['items', 'มีรายการค่าบริการ/ยาที่ตั้งไว้อย่างน้อย 1 รายการ และสิทธิตรงเงื่อนไข', 'เช่น HC, AE, INST'],
+                    ['rights', 'ทุก visit ของสิทธิที่เลือก ที่มียอดเรียกเก็บใน HOSxP (ไม่ต้องตั้งรายการ)', 'เช่น OFC ยอดตั้งเบิกใช้ยอดเรียกเก็บของ visit (uc_money)'],
+                  ].map(([v, label, hint]) => (
+                    <div className="form-check" key={v}>
+                      <input id={`mm-${v}`} type="radio" name="match_mode" className="form-check-input" checked={form.match_mode === v}
+                        onChange={() => update({ match_mode: v })} />
+                      <label className="form-check-label" htmlFor={`mm-${v}`}>{label} <span className="small muted">({hint})</span></label>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
+              <PttypePicker key={form.originalCode || 'new'} list={pttypeList} error={pttypeError} value={form.pttypes} onChange={(pttypes) => update({ pttypes })}
+                groups={form.hipdata_codes} onGroupsChange={(hipdata_codes) => update({ hipdata_codes })} excluded={excludedHipdata} />
+
+              <div className="panel">
+                <div className="panel-title mb-1">
+                  เงื่อนไขรหัสโรค ICD-10 ({parseIcd(form.icd10Text).length ? `${parseIcd(form.icd10Text).length} รหัส` : 'ไม่กรอง'})
+                </div>
+                <p className="small muted mb-2">
+                  ใช้ร่วมกับเงื่อนไขด้านบน visit ต้องมีรหัสโรคตรงอย่างน้อย 1 รหัส ใส่รหัสเต็มหรือขึ้นต้นก็ได้ เช่น H25 นับ H250 ถึง H259
+                  มีหรือไม่มีจุดก็ได้ คั่นด้วยเว้นวรรค จุลภาค หรือขึ้นบรรทัดใหม่ เว้นว่างไว้ถ้าไม่ต้องการกรองรหัสโรค
+                </p>
+                <textarea className="form-control mb-2" rows={2} value={form.icd10Text} placeholder="เช่น H25, H26.9, Z51.5"
+                  onChange={(e) => update({ icd10Text: e.target.value })} aria-label="รหัส ICD-10" />
+                {parseIcd(form.icd10Text).length > 0 && (
+                  <div className="d-flex flex-wrap gap-1 mb-2">
+                    {parseIcd(form.icd10Text).map((c) => (
+                      <span key={c} className={`badge ${/^[A-Z][0-9][0-9A-Z]{0,5}$/.test(c) ? 'text-bg-light border' : 'text-bg-danger'}`}>{c}</span>
+                    ))}
+                  </div>
+                )}
+                <div className="d-flex flex-wrap gap-3">
+                  {[['any', 'โรคหลักหรือโรครอง'], ['pdx', 'เฉพาะโรคหลัก (PDX)']].map(([v, label]) => (
+                    <div className="form-check" key={v}>
+                      <input id={`icd-${v}`} type="radio" name="icd10_scope" className="form-check-input"
+                        checked={form.icd10_scope === v} onChange={() => update({ icd10_scope: v })} />
+                      <label className="form-check-label" htmlFor={`icd-${v}`}>{label}</label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {form.match_mode === 'items' && (
               <div className="panel">
                 <div className="panel-title mb-1">
                   รายการที่เข้าเงื่อนไข ({form.items.length})
@@ -361,6 +520,9 @@ export default function FundSettingsPage() {
                   )}
                 </div>
               </div>
+
+              )}
+              </>)}
 
               <div className="d-flex justify-content-between align-items-center">
                 <span className="small muted">หลังเพิ่มรายการใหม่ ต้องดึงข้อมูล HOSxP ใหม่จึงจะเห็น visit ของรายการนั้น</span>

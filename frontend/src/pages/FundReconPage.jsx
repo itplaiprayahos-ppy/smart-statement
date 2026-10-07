@@ -9,13 +9,13 @@ import PeriodFields from '../components/PeriodFields.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { showError } from '../utils/alert.js';
 import {
-  ALL_FUND_STATUS_META, EXTRA_PAID_META, FUNDS, FUND_STATUS_META, FUND_STATUS_ORDER, int, lastMonthRange,
+  ALL_FUND_STATUS_META, EXTRA_PAID_META, RECEIVED_META, FUNDS, FUND_STATUS_META, FUND_STATUS_ORDER, int, lastMonthRange,
   money, monthsBetween, percent, rangeErrorOf, thaiDate, thaiMonth,
 } from '../utils/format.js';
 import { pullHosxpOpd } from '../utils/hosxp.js';
 
 const PAGE_SIZE = 50;
-const ALL_STATUSES = [...FUND_STATUS_ORDER, 'EXTRA_PAID'];
+const ALL_STATUSES = [...FUND_STATUS_ORDER, 'EXTRA_PAID', 'RECEIVED'];
 
 function FundStatus({ status }) {
   const m = ALL_FUND_STATUS_META[status];
@@ -25,7 +25,7 @@ function FundStatus({ status }) {
 /** รวมผลจาก backend เป็นแถวละกองทุน */
 function buildSummary(data) {
   const empty = () => ({
-    patients: 0, visits: 0, his: 0, stm: 0, extraCount: 0, extraAmount: 0,
+    patients: 0, visits: 0, his: 0, stm: 0, extraCount: 0, extraAmount: 0, receivedCount: 0, receivedAmount: 0,
     ...Object.fromEntries(FUND_STATUS_ORDER.map((s) => [s, 0])),
   });
   const byFund = Object.fromEntries(data.funds.map((f) => [f.code, { ...f, ...empty() }]));
@@ -41,6 +41,10 @@ function buildSummary(data) {
       if (r.fund_status === 'EXTRA_PAID') {
         x.extraCount += r.count;
         x.extraAmount += Number(r.stm_amount);
+      } else if (r.fund_status === 'RECEIVED') {
+        // ยอดรับของกองทุนติดตามยอดรับ แยกไว้ ไม่นำไปคิด "เบิกได้ %" ของกองทุนที่มีเกณฑ์
+        x.receivedCount += r.count;
+        x.receivedAmount += Number(r.stm_amount);
       } else {
         x[r.fund_status] += r.count;
         x.his += Number(r.his_amount);
@@ -135,7 +139,7 @@ export default function FundReconPage() {
       <div className="page-head">
         <div>
           <h1>แยกกองทุน OPD</h1>
-          <p>คนไข้ที่เข้าเกณฑ์เบิกตามรายการค่าบริการ/ยาและสิทธิที่ตั้งค่าไว้ จำนวนเงินที่ตั้งเบิก และจำนวนเงินที่เบิกได้จริงจาก Statement</p>
+          <p>คนไข้ที่เข้าเกณฑ์เบิกตามรายการค่าบริการ/ยาและสิทธิที่ตั้งค่าไว้ จำนวนเงินที่ตั้งเบิก และจำนวนเงินที่เบิกได้จริงจาก REP</p>
         </div>
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-outline-primary" onClick={pull} disabled={!!rangeError}>
@@ -220,18 +224,31 @@ export default function FundReconPage() {
                 <tr key={f.code} className={fundCode === f.code ? 'active' : ''} onClick={() => select(fundCode === f.code ? '' : f.code, '')}>
                   <td>
                     <strong>{f.code}</strong> <span className="muted">{f.name}</span>
-                    {f.item_count === 0 && (
+                    {f.item_count === 0 && !f.track_only && f.match_mode !== 'rights' && (
                       <div className="small text-warning-emphasis">
                         ยังไม่ได้ตั้งค่ารายการ{isAdmin && <> <Link to="/funds/settings" onClick={(e) => e.stopPropagation()}>ตั้งค่า</Link></>}
                       </div>
                     )}
                   </td>
-                  <td className="num">{int(f.patients)}</td>
-                  <td className="num">{int(f.visits)}</td>
-                  <td className="num">{money(f.his)}</td>
-                  <td className="num">{money(f.stm)}</td>
-                  <td className="num">{percent(f.stm, f.his)}</td>
-                  {FUND_STATUS_ORDER.map((s) => countCell(f.code, s, f[s], FUND_STATUS_META[s]))}
+                  {f.track_only ? (
+                    <>
+                      <td className="num muted">–</td>
+                      <td className="num">{countCell(f.code, 'RECEIVED', f.receivedCount, RECEIVED_META).props.children}</td>
+                      <td className="num muted">–</td>
+                      <td className="num">{money(f.receivedAmount)}</td>
+                      <td className="num muted">–</td>
+                      <td colSpan={FUND_STATUS_ORDER.length} className="small muted">ติดตามยอดรับ ไม่มีเกณฑ์คัด visit</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="num">{int(f.patients)}</td>
+                      <td className="num">{int(f.visits)}</td>
+                      <td className="num">{money(f.his)}</td>
+                      <td className="num">{money(f.stm)}</td>
+                      <td className="num">{percent(f.stm, f.his)}</td>
+                      {FUND_STATUS_ORDER.map((s) => countCell(f.code, s, f[s], FUND_STATUS_META[s]))}
+                    </>
+                  )}
                   {countCell(f.code, 'EXTRA_PAID', f.extraCount, EXTRA_PAID_META)}
                   <td className="num">{f.extraCount ? money(f.extraAmount) : <span className="muted">–</span>}</td>
                 </tr>
@@ -244,8 +261,10 @@ export default function FundReconPage() {
                   <td className="num" title="นับคนไข้ไม่ซ้ำ แม้อยู่หลายกองทุน">{int(summary.all.patients)}</td>
                   <td className="num" title="นับ visit ไม่ซ้ำ แม้อยู่หลายกองทุน">{int(summary.all.visits)}</td>
                   <td className="num">{money(summary.all.his)}</td>
-                  <td className="num">{money(summary.all.stm)}</td>
-                  <td className="num">{percent(summary.all.stm, summary.all.his)}</td>
+                  <td className="num" title="รวมยอดรับของกองทุนติดตามยอดรับ (FS, DRUG) ด้วย">
+                    {money(summary.all.stm + summary.all.receivedAmount)}
+                  </td>
+                  <td className="num" title="คิดจากกองทุนที่มีเกณฑ์เท่านั้น">{percent(summary.all.stm, summary.all.his)}</td>
                   {FUND_STATUS_ORDER.map((s) => <td key={s} className="num">{int(summary.all[s])}</td>)}
                   <td className="num">{int(summary.all.extraCount)}</td>
                   <td className="num">{money(summary.all.extraAmount)}</td>
@@ -279,7 +298,7 @@ export default function FundReconPage() {
                 <th className="num">ยอดตั้งเบิก</th>
                 <th className="num">ยอดเบิกได้</th>
                 <th className="num">เบิกได้ %</th>
-                <th className="num">ไม่พบใน Statement</th>
+                <th className="num">ไม่พบใน REP</th>
                 <th className="num">ยอดที่ยังไม่ได้เบิก</th>
                 <th className="num">ได้รับแต่ไม่เข้าเกณฑ์</th>
               </tr>
@@ -367,7 +386,7 @@ export default function FundReconPage() {
                 <th className="num">ยอดตั้งเบิก</th>
                 <th className="num">ยอดเบิกได้</th>
                 <th className="num">ผลต่าง</th>
-                <th>REP / TRAN_ID / รอบ STM</th>
+                <th>REP / TRAN_ID / เลขที่ REP</th>
                 <th>รหัสข้อผิดพลาด</th>
               </tr>
             </thead>

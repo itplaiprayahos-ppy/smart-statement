@@ -1,7 +1,6 @@
-// สร้าง admin เริ่มต้น และรูปแบบ mapping ตัวอย่าง (รันซ้ำได้ ไม่สร้างซ้ำ)
+// สร้าง admin เริ่มต้น (รันซ้ำได้ ไม่สร้างซ้ำ) รูปแบบไฟล์ REP มาจาก migration
 import bcrypt from 'bcryptjs';
 import { db } from '../src/config/db.js';
-import { DEFAULT_OPD_MAPPING } from '../src/services/excelParser.js';
 
 async function main() {
   const username = process.env.ADMIN_USERNAME || 'admin';
@@ -17,13 +16,7 @@ async function main() {
   );
   console.log(u.rowCount ? `✔ สร้างผู้ใช้ ${username} (admin)` : `• มีผู้ใช้ ${username} อยู่แล้ว`);
 
-  const m = await db.query(
-    `INSERT INTO column_mappings (name, claim_type, mapping)
-     VALUES ('e-Claim REP OPD (ค่าเริ่มต้น)', 'OPD', $1)
-     ON CONFLICT (name) DO NOTHING RETURNING id`,
-    [JSON.stringify(DEFAULT_OPD_MAPPING)],
-  );
-  console.log(m.rowCount ? '✔ สร้าง mapping ค่าเริ่มต้น' : '• มี mapping ค่าเริ่มต้นอยู่แล้ว');
+  // รูปแบบไฟล์ REP ถูกสร้างโดย migration 011 แล้ว
   await db.end();
 }
 

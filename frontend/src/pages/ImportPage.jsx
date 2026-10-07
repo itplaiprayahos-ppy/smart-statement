@@ -36,11 +36,30 @@ export default function ImportPage() {
   const [drag, setDrag] = useState(false);
   const [preview, setPreview] = useState(null);
   const [history, setHistory] = useState([]);
+  const [legacy, setLegacy] = useState(null);
   const inputRef = useRef(null);
 
   const loadHistory = useCallback(() => {
     api.get('/imports', { params: { claimType: 'OPD' } }).then((r) => setHistory(r.data)).catch(showError);
+    api.get('/imports/legacy-stm').then((r) => setLegacy(r.data)).catch(() => {});
   }, []);
+
+  const removeLegacy = async () => {
+    const ok = await confirmAction({
+      title: 'ลบข้อมูล Statement เดิมทั้งหมด?',
+      text: `ไฟล์ Statement ${int(legacy.batches)} ไฟล์ (${int(legacy.lines)} รายการ) จะถูกลบถาวร ระบบจะใช้ข้อมูลจาก REP อย่างเดียว`,
+      confirmText: 'ลบข้อมูล Statement',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const { data } = await api.delete('/imports/legacy-stm');
+      notifySuccess(`ลบแล้ว ${int(data.deleted)} ไฟล์`);
+      loadHistory();
+    } catch (err) {
+      showError(err);
+    }
+  };
 
   useEffect(() => {
     Promise.all([api.get('/mappings', { params: { active: 1 } }), api.get('/mappings/fields')])
@@ -131,9 +150,22 @@ export default function ImportPage() {
       <div className="page-head">
         <div>
           <h1>นำเข้าไฟล์ สปสช.</h1>
-          <p>ไฟล์ REP หรือ Statement ที่ดาวน์โหลดจาก e-Claim (.xlsx, .xls) ระบบจะตรวจไฟล์ให้ดูก่อนบันทึก</p>
+          <p>ไฟล์ REP ที่ดาวน์โหลดจาก e-Claim (.xls, .xlsx) ชีต Detail ระบบจะตรวจไฟล์ให้ดูก่อนบันทึก</p>
         </div>
       </div>
+
+      {legacy?.batches > 0 && (
+        <div className="alert alert-warning d-flex flex-wrap align-items-center gap-2">
+          <i className="bi bi-exclamation-triangle" />
+          <span className="me-auto">
+            ยังมีข้อมูลจากไฟล์ Statement เดิม {int(legacy.batches)} ไฟล์ ({int(legacy.lines)} รายการ)
+            ถ้าใช้คู่กับ REP ยอดเบิกได้จะถูกนับซ้ำ ควรลบออกก่อนนำเข้า REP
+          </span>
+          {isAdmin && (
+            <button type="button" className="btn btn-sm btn-danger" onClick={removeLegacy}>ลบข้อมูล Statement เดิม</button>
+          )}
+        </div>
+      )}
 
       <div className="panel">
         <div className="row g-3 align-items-end">
@@ -179,8 +211,8 @@ export default function ImportPage() {
           <div className="panel-title">ผลการตรวจไฟล์ {preview.fileName}</div>
           <p className="muted mb-3">
             {preview.stmDoc
-              ? <>รอบ STM <strong>{preview.stmDoc}</strong>{preview.stmPeriod && ` (${thaiMonth(preview.stmPeriod.slice(0, 7))})`}, </>
-              : <span className="text-warning-emphasis">ไม่พบเลขที่เอกสาร STM (รายการจะไม่แยกตามรอบ), </span>}
+              ? <>เลขที่ REP <strong>{preview.stmDoc}</strong>{preview.stmPeriod && ` (${thaiMonth(preview.stmPeriod.slice(0, 7))})`}, </>
+              : <span className="text-warning-emphasis">ไม่พบเลขที่ REP (รายการจะไม่แยกตามรอบ), </span>}
             ชีต “{preview.sheetName}” หัวตารางอยู่แถวที่ {preview.headerRowNumber}:
             พบ {int(preview.totalRows)} แถว นำเข้าได้ {int(preview.validRows)} แถว
             {preview.errorCount > 0 && <>, <span className="text-danger">มีปัญหา {int(preview.errorCount)} แถว</span></>}
@@ -287,7 +319,7 @@ export default function ImportPage() {
             <table className="table table-hover data-table">
               <thead>
                 <tr>
-                  <th>เวลา</th><th>ไฟล์</th><th>รอบ STM</th><th>ช่วงวันที่ในไฟล์</th>
+                  <th>เวลา</th><th>ไฟล์</th><th>เลขที่ REP</th><th>ช่วงวันที่ในไฟล์</th>
                   <th className="num">เพิ่มใหม่</th><th className="num">อัปเดต</th><th className="num">ข้าม</th>
                   <th>ผู้นำเข้า</th><th />
                 </tr>
@@ -296,7 +328,11 @@ export default function ImportPage() {
                 {history.map((b) => (
                   <tr key={b.id}>
                     <td className="text-nowrap">{thaiDateTime(b.created_at)}</td>
-                    <td>{b.file_name}<div className="small-id">{b.mapping_name}</div></td>
+                    <td>
+                      {b.file_name}
+                      {b.file_type === 'STM' && <span className="badge text-bg-warning ms-1">Statement เดิม</span>}
+                      <div className="small-id">{b.mapping_name}</div>
+                    </td>
                     <td>{b.stm_doc || <span className="muted">–</span>}
                       {b.stm_period && <div className="small-id">{thaiMonth(b.stm_period.slice(0, 7))}</div>}
                     </td>

@@ -9,27 +9,27 @@ export const REPORT_TYPES = {
   eligible: {
     title: 'คนไข้ที่เข้าเกณฑ์กองทุน',
     description: 'ทุก visit ที่มีรายการค่าบริการ/ยาและสิทธิตรงตามการตั้งค่ากองทุน พร้อมสถานะการเบิก',
-    where: "fund_status <> 'EXTRA_PAID'",
+    where: "fund_status NOT IN ('EXTRA_PAID', 'RECEIVED')",
   },
   not_sent: {
-    title: 'ยังไม่ส่งเบิก / ไม่พบใน Statement',
-    description: 'visit ที่เข้าเกณฑ์แต่ยังไม่มีใน Statement ที่นำเข้า ใช้ตรวจว่าส่งเบิกแล้วหรือยัง',
+    title: 'ยังไม่ส่งเบิก / ไม่พบใน REP',
+    description: 'visit ที่เข้าเกณฑ์แต่ยังไม่มีใน REP ที่นำเข้า ใช้ตรวจว่าส่งเบิกแล้วหรือยัง',
     where: "fund_status = 'NOT_SENT'",
   },
   failed: {
     title: 'เคลมไม่สำเร็จ',
-    description: 'พบใน Statement แต่ไม่ได้รับเงินกองทุนนี้ หรือถูกปฏิเสธ / ติด C พร้อมรายการที่ขาด',
+    description: 'พบใน REP แต่ไม่ได้รับเงินกองทุนนี้ หรือถูกปฏิเสธ / ติด C พร้อมรายการที่ขาด',
     where: "fund_status IN ('NOT_PAID', 'DENIED')",
   },
   incomplete: {
     title: 'ข้อมูลอาจไม่ครบถ้วน',
     description: 'visit ที่เข้าเกณฑ์และมีประเด็นที่ควรตรวจ เช่น ไม่มีเลขบัตร ไม่มี PDX ขาดรายการจำเป็น',
-    where: "fund_status <> 'EXTRA_PAID' AND issues <> ''",
+    where: "fund_status NOT IN ('EXTRA_PAID', 'RECEIVED') AND issues <> ''",
   },
   paid: {
     title: 'ได้รับเงินแล้ว',
-    description: 'visit ที่เข้าเกณฑ์และได้รับเงินกองทุนแล้ว พร้อมรอบ STM ใช้กระทบยอดรับเงิน',
-    where: "fund_status = 'PAID'",
+    description: 'visit ที่ได้รับเงินกองทุนแล้ว รวมกองทุนติดตามยอดรับ (FS, DRUG) พร้อมเลขที่ REP ใช้กระทบยอดรับเงิน',
+    where: "fund_status IN ('PAID', 'RECEIVED')",
   },
   extra_paid: {
     title: 'ได้รับเงินแต่ไม่เข้าเกณฑ์',
@@ -40,9 +40,9 @@ export const REPORT_TYPES = {
 
 /** ประเด็นที่ควรตรวจต่อ visit (คำนวณใน SQL) */
 const ISSUES_SQL = `array_to_string(array_remove(ARRAY[
-    CASE WHEN fund_status <> 'EXTRA_PAID' AND (cid IS NULL OR cid !~ '^[0-9]{13}$')
+    CASE WHEN fund_status NOT IN ('EXTRA_PAID', 'RECEIVED') AND (cid IS NULL OR cid !~ '^[0-9]{13}$')
          THEN 'ไม่มีเลขบัตรประชาชนหรือไม่ครบ 13 หลัก' END,
-    CASE WHEN fund_status <> 'EXTRA_PAID' AND COALESCE(TRIM(pdx), '') = ''
+    CASE WHEN fund_status NOT IN ('EXTRA_PAID', 'RECEIVED') AND COALESCE(TRIM(pdx), '') = ''
          THEN 'ไม่มีรหัสโรคหลัก (PDX)' END,
     CASE WHEN missing_required IS NOT NULL THEN 'ขาดรายการจำเป็น' END,
     CASE WHEN missing_common IS NOT NULL THEN 'ขาดรายการที่เคสได้รับเงินมักมี' END,
@@ -53,8 +53,9 @@ const STATUS_TH = {
   PAID: 'ได้รับเงิน',
   NOT_PAID: 'ไม่ได้รับเงินกองทุนนี้',
   DENIED: 'ถูกปฏิเสธ/ติด C',
-  NOT_SENT: 'ไม่พบใน Statement',
+  NOT_SENT: 'ไม่พบใน REP',
   EXTRA_PAID: 'ได้รับเงินแต่ไม่เข้าเกณฑ์',
+  RECEIVED: 'ได้รับเงิน (ติดตามยอดรับ)',
 };
 
 const MAX_ROWS = 300_000;
@@ -104,7 +105,7 @@ function toSheetRows(rows) {
     'ยอดเบิกได้ (กองทุนนี้)': r.stm_fund_amount,
     'REP No.': r.rep_no,
     'TRAN_ID': r.tran_id,
-    'รอบ STM': r.stm_docs,
+    'เลขที่ REP': r.stm_docs,
     'รหัสข้อผิดพลาด': r.error_code,
     'ผลการแก้ไข / หมายเหตุ': '',
   }));

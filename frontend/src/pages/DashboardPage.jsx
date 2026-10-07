@@ -101,7 +101,7 @@ export default function DashboardPage() {
           <h1>ภาพรวมผลการเบิก OPD</h1>
           <p>
             ปีงบประมาณ {fy} ({thaiDate(range.dateFrom)} – {thaiDate(range.dateTo)})
-            ตัวชี้วัดคิดเฉพาะเดือนที่มี Statement แล้ว เดือนที่ยังไม่มีแสดงเป็น “รอผล”
+            ตัวชี้วัดคิดเฉพาะเดือนที่มี REP แล้ว เดือนที่ยังไม่มีแสดงเป็น “รอผล”
           </p>
         </div>
         <div className="d-flex align-items-center gap-2">
@@ -115,7 +115,7 @@ export default function DashboardPage() {
 
       {/* ---------- ตัวเลขหลัก ---------- */}
       <div className="kpi-grid">
-        <KpiCard label="ยอดเบิกได้" value={o ? money(o.stm_amount) : '–'} sub="บาท จาก Statement ทุกรอบ" />
+        <KpiCard label="ยอดเบิกได้" value={o ? money(o.stm_amount) : '–'} sub="บาท จาก REP ทุกรอบ" />
         <KpiCard label="ยอดที่ยังไม่ส่งเบิก" value={o ? money(o.not_sent_amount) : '–'}
           sub={o?.pending_amount > 0 ? `บาท (รอผลอีก ${money(o.pending_amount)})` : 'บาท ในเดือนที่ปิดยอดแล้ว'} />
         <KpiCard label="อัตราการส่งเบิก" value={fmtRate(sendRate)} target={d.send} level={kpiLevel(sendRate, d.send)}
@@ -158,15 +158,26 @@ export default function DashboardPage() {
                   <tr key={f.code} onClick={isExec ? undefined : () => navigate('/recon/funds')}
                     title={isExec ? undefined : 'เปิดหน้าแยกกองทุน'}>
                     <td><strong>{f.code}</strong> <span className="muted">{f.name}</span>
-                      {f.item_count === 0 && <div className="small text-warning-emphasis">ยังไม่ได้ตั้งค่ารายการ</div>}
+                      {f.item_count === 0 && !f.track_only && f.match_mode !== 'rights' && <div className="small text-warning-emphasis">ยังไม่ได้ตั้งค่ารายการ</div>}
                     </td>
-                    <td>{f.responsible || <span className="text-warning-emphasis small">ยังไม่กำหนด</span>}</td>
-                    <td className="num">{k ? int(k.patients) : '–'}</td>
-                    <td className="num">{k ? int(k.eligible) : '–'}</td>
-                    <RateCell value={k ? rate(k.sent, k.eligible) : null} target={f.target_send} trend={trendOf(f.code)} />
-                    <RateCell value={k ? rate(k.paid, k.sent) : null} target={f.target_success} />
-                    <RateCell value={k ? rate(k.complete, k.eligible) : null} target={f.target_complete} />
-                    <td className="num">{k ? money(k.not_sent_amount) : '–'}</td>
+                    <td>{f.responsible || <span className={f.track_only ? 'muted small' : 'text-warning-emphasis small'}>ยังไม่กำหนด</span>}</td>
+                    {f.track_only ? (
+                      <>
+                        <td className="num muted">–</td>
+                        <td className="num">{k ? `${int(k.received)} รายการ` : '–'}</td>
+                        <td colSpan={3} className="small muted">ติดตามยอดรับ ไม่วัดอัตราการส่งเบิก</td>
+                        <td className="num muted">–</td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="num">{k ? int(k.patients) : '–'}</td>
+                        <td className="num">{k ? int(k.eligible) : '–'}</td>
+                        <RateCell value={k ? rate(k.sent, k.eligible) : null} target={f.target_send} trend={trendOf(f.code)} />
+                        <RateCell value={k ? rate(k.paid, k.sent) : null} target={f.target_success} />
+                        <RateCell value={k ? rate(k.complete, k.eligible) : null} target={f.target_complete} />
+                        <td className="num">{k ? money(k.not_sent_amount) : '–'}</td>
+                      </>
+                    )}
                     <td className="num">{k ? money(k.stm_amount) : '–'}</td>
                     <td className="num">{k?.pending ? `${int(k.pending)} visit` : '–'}</td>
                   </tr>
@@ -176,7 +187,7 @@ export default function DashboardPage() {
           </table>
         </div>
         <p className="small muted mb-0 mt-2">
-          อัตราการส่งเบิก = visit ที่พบใน Statement ÷ visit ที่เข้าเกณฑ์, อัตราเคลมสำเร็จ = ได้รับเงิน ÷ ที่พบใน Statement,
+          อัตราการส่งเบิก = visit ที่พบใน REP ÷ visit ที่เข้าเกณฑ์, อัตราเคลมสำเร็จ = ได้รับเงิน ÷ ที่พบใน REP,
           ความครบถ้วน = visit ที่มีเลขบัตร 13 หลัก มี PDX และไม่ขาดรายการจำเป็น ÷ visit ที่เข้าเกณฑ์
           ลูกศรเทียบอัตราการส่งเบิกของเดือนปิดยอดล่าสุดกับเดือนก่อนหน้า
         </p>
@@ -200,11 +211,11 @@ export default function DashboardPage() {
       <div className="row g-3">
         <div className="col-lg-7">
           <div className="panel h-100">
-            <div className="panel-title">Statement ที่นำเข้าแล้ว (ปีงบ {fy})</div>
+            <div className="panel-title">REP ที่นำเข้าแล้ว (ปีงบ {fy})</div>
             {data?.rounds.length ? (
               <div className="table-wrap">
                 <table className="table table-sm data-table mb-0">
-                  <thead><tr><th>รอบ STM</th><th>เดือนของรอบ</th><th className="num">รายการ</th><th>วันที่รับบริการในรอบ</th></tr></thead>
+                  <thead><tr><th>เลขที่ REP</th><th>เดือนของรอบ</th><th className="num">รายการ</th><th>วันที่รับบริการในรอบ</th></tr></thead>
                   <tbody>
                     {data.rounds.map((r) => (
                       <tr key={`${r.stm_doc}-${r.stm_period}`}>
@@ -217,7 +228,7 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
-            ) : <p className="muted mb-0">ยังไม่มี Statement ของปีงบนี้</p>}
+            ) : <p className="muted mb-0">ยังไม่มี REP ของปีงบนี้</p>}
           </div>
         </div>
         <div className="col-lg-5">
@@ -227,8 +238,8 @@ export default function DashboardPage() {
               <li>
                 <i className={`bi ${pendingMonths.length ? 'bi-hourglass-split text-warning-emphasis' : 'bi-check-circle text-success'}`} />
                 {pendingMonths.length
-                  ? <>เดือนที่ยังไม่มี Statement (รอผล): {pendingMonths.map(thaiMonth).join(', ')}</>
-                  : 'ทุกเดือนที่ผ่านมามี Statement แล้ว'}
+                  ? <>เดือนที่ยังไม่มี REP (รอผล): {pendingMonths.map(thaiMonth).join(', ')}</>
+                  : 'ทุกเดือนที่ผ่านมามี REP แล้ว'}
               </li>
               <li>
                 <i className={`bi ${data?.notPulledMonths?.length ? 'bi-exclamation-triangle text-danger' : 'bi-check-circle text-success'}`} />

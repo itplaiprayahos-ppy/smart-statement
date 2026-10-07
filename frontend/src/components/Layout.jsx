@@ -13,6 +13,7 @@ const MENU = [
   { group: 'ผู้ดูแลระบบ', admin: true },
   { to: '/mappings', icon: 'bi-table', label: 'รูปแบบไฟล์ Excel', admin: true },
   { to: '/funds/settings', icon: 'bi-sliders', label: 'ตั้งค่ากองทุน', admin: true },
+  { to: '/error-codes', icon: 'bi-exclamation-octagon', label: 'รหัสข้อผิดพลาด', admin: true },
   { to: '/users', icon: 'bi-people', label: 'ผู้ใช้งาน', admin: true },
 ];
 
@@ -42,7 +43,7 @@ export default function Layout() {
       <aside className={`sidebar ${open ? 'open' : ''}`} onClick={() => setOpen(false)}>
         <div className="sidebar-brand">
           <div className="title">กระทบยอดเบิกจ่าย</div>
-          <div className="sub">HOSxP เทียบ Statement สปสช.</div>
+          <div className="sub">HOSxP เทียบ REP สปสช.</div>
         </div>
         <nav>
           {MENU.filter((m) => (isExec ? m.exec : (!m.admin || isAdmin))).map((m) =>

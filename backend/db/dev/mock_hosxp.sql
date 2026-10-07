@@ -3,7 +3,7 @@
 -- มีเฉพาะตาราง/ฟิลด์ที่ระบบใช้ ข้อมูลทั้งหมดเป็นข้อมูลสมมติ
 -- วิธีใช้: createdb hos_mock && psql -d hos_mock -f db/dev/mock_hosxp.sql
 -- =====================================================================
-DROP TABLE IF EXISTS opitemrece, nondrugitems, drugitems, vn_stat, patient, pttype;
+DROP TABLE IF EXISTS ovstdiag, opitemrece, nondrugitems, drugitems, vn_stat, patient, pttype;
 
 CREATE TABLE pttype (
   pttype        VARCHAR(2) PRIMARY KEY,
@@ -14,7 +14,7 @@ CREATE TABLE pttype (
 INSERT INTO pttype VALUES
   ('10', 'บัตรทอง (UC)', 'UCS', 'Y'),
   ('20', 'ข้าราชการ', 'OFC', 'Y'),
-  ('30', 'ชำระเงินเอง', 'A1', 'Y'),
+  ('30', 'ชำระเงินเอง', 'XXX', 'Y'),
   ('99', 'บัตรทอง (เลิกใช้)', 'UCS', 'N');
 
 CREATE TABLE patient (
@@ -118,3 +118,20 @@ WHERE (icode = '3000001' AND g % 7 = 0)
    OR (icode = '3200001' AND g % 11 = 0)
    OR (icode = '3300001' AND g % 13 = 0)
    OR (icode = '1600001' AND g % 8 = 0);
+
+-- ---------------------------------------------------------------------
+-- รหัสวินิจฉัยของ visit (ใช้ทดสอบเงื่อนไข ICD-10 ของกองทุน) diagtype 1 = โรคหลัก
+-- ---------------------------------------------------------------------
+CREATE TABLE ovstdiag (
+  hos_guid  SERIAL PRIMARY KEY,
+  vn        VARCHAR(13),
+  icd10     VARCHAR(9),
+  diagtype  CHAR(1),
+  vstdate   DATE
+);
+INSERT INTO ovstdiag (vn, icd10, diagtype, vstdate) SELECT vn, pdx, '1', vstdate FROM vn_stat;
+-- โรคร่วม: ผู้ป่วยระยะท้าย (Z515) และต้อกระจก (H251) ในบาง visit
+INSERT INTO ovstdiag (vn, icd10, diagtype, vstdate)
+SELECT vn, 'Z515', '2', vstdate FROM vn_stat WHERE right(vn, 6)::int % 6 = 0
+UNION ALL
+SELECT vn, 'H251', '2', vstdate FROM vn_stat WHERE right(vn, 6)::int % 11 = 0;

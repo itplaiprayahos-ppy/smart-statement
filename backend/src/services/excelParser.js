@@ -15,6 +15,7 @@ export const FIELD_DEFS = {
   claim_amount: { label: 'ยอดเรียกเก็บ',       type: 'money' },
   compensated:  { label: 'ยอดชดเชย',          type: 'money' },
   error_code:   { label: 'รหัสข้อผิดพลาด',     type: 'text' },
+  patient_type: { label: 'ประเภทผู้ป่วย (OP/IP)', type: 'text' },
 };
 
 /**
@@ -50,6 +51,12 @@ export function normalizeStmDoc(text) {
 export function stmPeriodOf(doc) {
   const m = String(doc ?? '').match(/(25\d{2})(0[1-9]|1[0-2])/);
   return m ? `${Number(m[1]) - 543}-${m[2]}-01` : null;
+}
+
+/** เลขที่ REP เช่น 690900086 -> '2026-09-01' (สองหลักแรก = ปี พ.ศ. 25xx, สองหลักถัดไป = เดือน) */
+export function repPeriodOf(repNo) {
+  const m = String(repNo ?? '').match(/^(\d{2})(0[1-9]|1[0-2])\d{3,}$/);
+  return m ? `${2500 + Number(m[1]) - 543}-${m[2]}-01` : null;
 }
 
 /** หาเลขเอกสารจากหัวรายงานเหนือตาราง ถ้าไม่พบใช้ชื่อไฟล์ */
@@ -134,23 +141,28 @@ export function findFundColumns(columns, name) {
   if (exact) return [exact];
 
   const nameParts = splitPath(name);
-  let best = null; // { depth, prefix }
-  for (const c of columns) {
-    for (let start = 0; start + nameParts.length <= c.parts.length; start += 1) {
-      const hit = nameParts.every((p, i) => c.parts[start + i] === p);
-      if (!hit) continue;
-      const depth = start + nameParts.length;
-      if (!best || depth < best.depth) best = { depth, prefix: c.parts.slice(0, depth) };
-      break;
+  // รอบแรกเทียบตรงตัว รอบสองตัดวงเล็บท้ายชื่อออกก่อนเทียบ เช่น "OPAE (1.1*4*5)" ตรงกับ "OPAE"
+  const stripParen = (p) => p.replace(/\(.*\)$/, '');
+  for (const eq of [(a, b) => a === b, (a, b) => a === b || stripParen(a) === b]) {
+    let best = null; // { depth, prefix }
+    for (const c of columns) {
+      for (let start = 0; start + nameParts.length <= c.parts.length; start += 1) {
+        const hit = nameParts.every((p, i) => eq(c.parts[start + i], p));
+        if (!hit) continue;
+        const depth = start + nameParts.length;
+        if (!best || depth < best.depth) best = { depth, prefix: c.parts.slice(0, depth) };
+        break;
+      }
     }
-  }
-  if (!best) return [];
+    if (!best) continue;
 
-  const group = columns.filter((c) => c.parts.length >= best.depth
-    && best.prefix.every((p, i) => c.parts[i] === p));
-  const paid = group.filter((c) => c.parts[c.parts.length - 1] === PAID_LEAF);
-  if (paid.length) return paid;
-  return group.filter((c) => c.parts[c.parts.length - 1] !== CALC_LEAF);
+    const group = columns.filter((c) => c.parts.length >= best.depth
+      && best.prefix.every((p, i) => c.parts[i] === p));
+    const paid = group.filter((c) => c.parts[c.parts.length - 1] === PAID_LEAF);
+    if (paid.length) return paid;
+    return group.filter((c) => c.parts[c.parts.length - 1] !== CALC_LEAF);
+  }
+  return [];
 }
 
 function buildColumnIndex(columns, mapping) {
@@ -285,6 +297,16 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
   const colIndex = buildColumnIndex(columns, profile.mapping);
   const label = (c) => columns[c]?.label;
 
+  // ยอดเงินที่ชื่อตรงกับหัวกลุ่ม (เช่น "ชดเชยสุทธิ" = สปสช. + ต้นสังกัด) ให้รวมทุกคอลัมน์ย่อย
+  const moneyCols = {};
+  for (const field of ['claim_amount', 'compensated']) {
+    if (colIndex[field] !== undefined) { moneyCols[field] = [colIndex[field]]; continue; }
+    for (const alias of aliasesOf(profile.mapping, field)) {
+      const group = findFundColumns(columns, alias);
+      if (group.length) { moneyCols[field] = group.map((c) => c.index); break; }
+    }
+  }
+
   const missingRequired = Object.entries(FIELD_DEFS)
     .filter(([k, d]) => d.required && colIndex[k] === undefined).map(([k]) => FIELD_DEFS[k].label);
   if (colIndex.tran_id === undefined && colIndex.rep_no === undefined) missingRequired.push('TRAN_ID หรือ เลข REP');
@@ -314,7 +336,10 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
     headerRowNumber: headerIdx + 1 + offset,
     headerDepth: depth,
     headers: columns.map((c) => c.label).filter(Boolean),
-    matchedColumns: Object.fromEntries(Object.entries(colIndex).map(([f, c]) => [f, label(c)])),
+    matchedColumns: {
+      ...Object.fromEntries(Object.entries(colIndex).map(([f, c]) => [f, label(c)])),
+      ...Object.fromEntries(Object.entries(moneyCols).map(([f, cs]) => [f, cs.map(label).join(' + ')])),
+    },
     fundColumns,
     missingRequired,
     records: [],
@@ -371,14 +396,32 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
       continue;
     }
     started = true;
+
+    // ไฟล์ OPD ที่มีรายการผู้ป่วยใน ข้ามโดยไม่นับเป็นข้อผิดพลาด
+    const ptype = text(cell('patient_type'));
+    if (ptype && profile.claim_type === 'OPD' && /^IP$/i.test(ptype)) {
+      skip(rowNumber);
+      continue;
+    }
     result.totalRows += 1;
 
     const problems = [];
     if (!pid || !/^\d{13}$/.test(pid)) problems.push(`เลขบัตรประชาชนไม่ถูกต้อง (${cell('pid') ?? 'ว่าง'})`);
     const serviceDate = parseDate(rawDate);
     if (!serviceDate) problems.push(`วันที่รับบริการอ่านไม่ได้ (${rawDate ?? 'ว่าง'})`);
-    const claim = parseMoney(cell('claim_amount'));
-    const comp = parseMoney(cell('compensated'));
+    const sumMoney = (field) => {
+      const idxs = moneyCols[field];
+      if (!idxs) return { value: null };
+      let sum = null;
+      for (const c of idxs) {
+        const m = parseMoney(row[c]);
+        if (m.error) return m;
+        if (m.value !== null) sum = Math.round(((sum ?? 0) + m.value) * 100) / 100;
+      }
+      return { value: sum };
+    };
+    const claim = sumMoney('claim_amount');
+    const comp = sumMoney('compensated');
     if (claim.error) problems.push('ยอดเรียกเก็บไม่ใช่ตัวเลข');
     if (comp.error) problems.push('ยอดชดเชยไม่ใช่ตัวเลข');
 
@@ -401,7 +444,10 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
     const hn = text(cell('hn'));
     // รายการเดียวกันในรอบ STM ต่างกัน เก็บแยกกัน (ยอดปรับปรุงรอบหลังจะไม่ทับรอบแรก)
     const baseKey = tranId ? `T:${tranId}` : `R:${repNo ?? ''}|${pid}|${serviceDate}|${hn ?? ''}`;
-    const lineKey = stmDoc ? `${baseKey}|${stmDoc}` : baseKey;
+    // รอบของรายการ: เลขเอกสาร Statement หรือเลขที่ REP (ไฟล์ REP ไม่มีเลขเอกสารแบบ Statement)
+    const lineDoc = stmDoc || (repNo ? `REP${repNo}` : null);
+    const linePeriod = stmPeriod || repPeriodOf(repNo);
+    const lineKey = lineDoc ? `${baseKey}|${lineDoc}` : baseKey;
     if (seen.has(lineKey)) {
       addError(rowNumber, `รายการซ้ำกับแถว ${seen.get(lineKey)} ในไฟล์เดียวกัน (ใช้แถวหลังสุด)`);
       result.records = result.records.filter((r) => r.line_key !== lineKey);
@@ -429,10 +475,19 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
       compensated: comp.value,
       error_code: text(cell('error_code')),
       fund_amounts: fundAmounts,
-      stm_doc: stmDoc,
-      stm_period: stmPeriod,
+      stm_doc: lineDoc,
+      stm_period: linePeriod,
       raw,
     });
+  }
+
+  // ไฟล์ REP: สรุปเลขที่ REP ของทั้งไฟล์ไว้ในประวัติการนำเข้า
+  if (!result.stmDoc && result.records.length) {
+    const docs = [...new Set(result.records.map((r) => r.stm_doc).filter(Boolean))];
+    if (docs.length) {
+      result.stmDoc = docs.length === 1 ? docs[0] : `${docs[0]} (+${docs.length - 1})`;
+      result.stmPeriod = result.records.find((r) => r.stm_period)?.stm_period ?? null;
+    }
   }
   return result;
 }

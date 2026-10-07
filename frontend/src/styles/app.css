@@ -257,3 +257,7 @@ body { font-size: 0.95rem; line-height: 1.6; }
 .kpi-table.clickable tbody tr { cursor: pointer; }
 .data-status li { display: flex; gap: 0.5rem; align-items: flex-start; margin-bottom: 0.5rem; }
 .data-status li i { margin-top: 0.15rem; }
+
+/* ---------- รายละเอียดรหัสข้อผิดพลาด ---------- */
+.error-detail { font-size: 0.82rem; line-height: 1.45; }
+.error-detail .guidance { color: var(--cr-muted); margin-top: 0.2rem; }

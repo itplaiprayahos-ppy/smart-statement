@@ -11,6 +11,7 @@ import AccountPage from './pages/AccountPage.jsx';
 import FundReconPage from './pages/FundReconPage.jsx';
 import FundSettingsPage from './pages/FundSettingsPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
+import ErrorCodesPage from './pages/ErrorCodesPage.jsx';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
           <Route element={<ProtectedRoute roles={['admin']} />}>
             <Route path="mappings" element={<MappingsPage />} />
             <Route path="funds/settings" element={<FundSettingsPage />} />
+            <Route path="error-codes" element={<ErrorCodesPage />} />
             <Route path="users" element={<UsersPage />} />
           </Route>
         </Route>

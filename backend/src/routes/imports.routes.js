@@ -82,7 +82,7 @@ router.post('/', upload.single('file'), asyncHandler(async (req, res) => {
 router.get('/', asyncHandler(async (req, res) => {
   const { rows } = await db.query(
     `SELECT b.id, b.file_name, b.claim_type, b.total_rows, b.inserted_rows, b.updated_rows,
-            b.error_rows, b.created_at, b.stm_doc, b.stm_period, m.name AS mapping_name, u.username AS imported_by,
+            b.error_rows, b.created_at, b.stm_doc, b.stm_period, b.file_type, m.name AS mapping_name, u.username AS imported_by,
             (SELECT COUNT(*)::int FROM nhso_lines l WHERE l.batch_id = b.id) AS current_rows,
             (SELECT MIN(service_date) FROM nhso_lines l WHERE l.batch_id = b.id) AS date_min,
             (SELECT MAX(service_date) FROM nhso_lines l WHERE l.batch_id = b.id) AS date_max
@@ -94,6 +94,22 @@ router.get('/', asyncHandler(async (req, res) => {
     [req.query.claimType || null],
   );
   res.json(rows);
+}));
+
+/** ข้อมูล Statement เดิม (ก่อนเปลี่ยนมาใช้ REP) ที่ยังค้างอยู่ */
+router.get('/legacy-stm', asyncHandler(async (_req, res) => {
+  const { rows: [r] } = await db.query(`
+    SELECT COUNT(DISTINCT b.id)::int AS batches, COUNT(l.id)::int AS lines
+    FROM import_batches b LEFT JOIN nhso_lines l ON l.batch_id = b.id
+    WHERE b.file_type = 'STM'`);
+  res.json(r);
+}));
+
+/** ลบข้อมูล Statement เดิมทั้งหมด (ใช้ REP อย่างเดียว ป้องกันยอดนับซ้ำ) */
+router.delete('/legacy-stm', requireRole('admin'), asyncHandler(async (req, res) => {
+  const { rows } = await db.query(`DELETE FROM import_batches WHERE file_type = 'STM' RETURNING id`);
+  await audit(req, 'import_delete_legacy_stm', { batches: rows.length });
+  res.json({ deleted: rows.length });
 }));
 
 router.get('/:id', asyncHandler(async (req, res) => {
