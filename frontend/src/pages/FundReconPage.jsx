@@ -224,7 +224,7 @@ export default function FundReconPage() {
                 <tr key={f.code} className={fundCode === f.code ? 'active' : ''} onClick={() => select(fundCode === f.code ? '' : f.code, '')}>
                   <td>
                     <strong>{f.code}</strong> <span className="muted">{f.name}</span>
-                    {f.item_count === 0 && !f.track_only && f.match_mode !== 'rights' && (
+                    {f.item_count === 0 && !f.track_only && f.match_mode === 'items' && (
                       <div className="small text-warning-emphasis">
                         ยังไม่ได้ตั้งค่ารายการ{isAdmin && <> <Link to="/funds/settings" onClick={(e) => e.stopPropagation()}>ตั้งค่า</Link></>}
                       </div>

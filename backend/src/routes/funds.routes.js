@@ -48,12 +48,21 @@ router.get('/:code', asyncHandler(async (req, res) => {
   res.json({ ...fund, items });
 }));
 
-/** รหัส ICD-10 รับได้ทั้ง "H25.1", "h251", "Z51.5" -> "H251", "Z515" (ใช้เป็นขึ้นต้นด้วย) */
-function readIcd10(v) {
-  const list = (Array.isArray(v) ? v : String(v || '').split(/[\s,;]+/))
-    .map((c) => String(c).trim().toUpperCase().replace(/\./g, '')).filter(Boolean);
-  const bad = list.filter((c) => !/^[A-Z][0-9][0-9A-Z]{0,5}$/.test(c));
-  if (bad.length) throw new HttpError(400, `รหัส ICD-10 ไม่ถูกต้อง: ${bad.join(', ')}`);
+/**
+ * เงื่อนไขรหัส ICD-10 รับได้ทั้งรหัสเดี่ยวและช่วง (มีจุดหรือไม่มีก็ได้)
+ *  "H25.1, z51.5, C00 - C96" -> ["H251", "Z515", "C00-C96"]
+ */
+const ICD_RE = /^[A-Z][0-9][0-9A-Z]{0,5}$/;
+export function readIcd10(v) {
+  const text = Array.isArray(v) ? v.join(',') : String(v || '');
+  const list = text.toUpperCase().replace(/\./g, '').replace(/\s*[-–]\s*/g, '-')
+    .split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean);
+  const bad = list.filter((c) => {
+    const parts = c.split('-');
+    if (parts.length === 1) return !ICD_RE.test(c);
+    return parts.length !== 2 || !ICD_RE.test(parts[0]) || !ICD_RE.test(parts[1]) || parts[0] > parts[1];
+  });
+  if (bad.length) throw new HttpError(400, `รหัส ICD-10 ไม่ถูกต้อง: ${bad.join(', ')} (ช่วงต้องเขียนจากน้อยไปมาก เช่น C00-C96)`);
   return [...new Set(list)];
 }
 
@@ -84,10 +93,14 @@ function readFund(body = {}) {
   const targets = {
     send: pct(body.target_send, 95), success: pct(body.target_success, 90), complete: pct(body.target_complete, 95),
   };
+  if (body.match_mode === 'icd' && !body.track_only && !readIcd10(body.icd10_codes).length) {
+    throw new HttpError(400, 'วิธีคัดแบบ ICD-10 ต้องใส่รหัสโรคอย่างน้อย 1 รายการ');
+  }
   return {
     code, name, cols, items, pttypes, hipdataCodes, targets, trackOnly: body.track_only === true,
-    matchMode: body.match_mode === 'rights' ? 'rights' : 'items',
-    icd10Codes: readIcd10(body.icd10_codes),
+    matchMode: ['rights', 'icd'].includes(body.match_mode) ? body.match_mode : 'items',
+    // แบบสิทธิการรักษาไม่ใช้รหัสโรค
+    icd10Codes: body.match_mode === 'rights' ? [] : readIcd10(body.icd10_codes),
     icd10Scope: body.icd10_scope === 'pdx' ? 'pdx' : 'any',
     sort_order: Number.isInteger(Number(body.sort_order)) ? Number(body.sort_order) : 0,
     is_active: body.is_active !== false,

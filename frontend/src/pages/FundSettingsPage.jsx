@@ -4,149 +4,127 @@ import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
 import { money } from '../utils/format.js';
 
 const SOURCE_LABEL = { nondrug: 'ค่าบริการ', drug: 'ยา' };
+/** [ค่า, ชื่อสั้น, คำอธิบาย, ไอคอน] */
+const MATCH_MODES = [
+  ['items', 'ค่าบริการ', 'มีรายการค่าบริการ/ยาที่กำหนด', 'bi-receipt'],
+  ['rights', 'สิทธิการรักษา', 'ทุก visit ของสิทธิที่เลือก', 'bi-person-vcard'],
+  ['icd', 'ICD-10', 'ทุก visit ที่มีรหัสโรคที่กำหนด', 'bi-clipboard2-pulse'],
+];
+
 const blankFund = () => ({
   originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], pttypes: [],
   hipdata_codes: ['UCS'], target_send: 95, target_success: 90, target_complete: 95, track_only: false,
   match_mode: 'items', icd10Text: '', icd10_scope: 'any',
 });
 
-/** "H25.1, z515" -> ["H251", "Z515"] */
-const parseIcd = (text) => [...new Set(String(text || '').split(/[\s,;]+/)
-  .map((c) => c.trim().toUpperCase().replace(/\./g, '')).filter(Boolean))];
+/** "H25.1, z515, C00 - C96" -> ["H251", "Z515", "C00-C96"] (รหัสเดี่ยวหรือช่วง) */
+const parseIcd = (text) => [...new Set(String(text || '').toUpperCase().replace(/\./g, '')
+  .replace(/\s*[-–]\s*/g, '-').split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean))];
+const ICD_RE = /^[A-Z][0-9][0-9A-Z]{0,5}$/;
+const icdValid = (c) => {
+  const parts = c.split('-');
+  if (parts.length === 1) return ICD_RE.test(c);
+  return parts.length === 2 && ICD_RE.test(parts[0]) && ICD_RE.test(parts[1]) && parts[0] <= parts[1];
+};
 
 /**
- * สิทธิการรักษาที่เข้าเงื่อนไขกองทุน มี 2 แบบ (เลือกอย่างใดอย่างหนึ่ง)
- *  - ตามกลุ่มสิทธิ (hipdata_code): ตารางแสดงเฉพาะรหัสสิทธิในกลุ่มที่เลือก เพื่อให้เห็นว่านับสิทธิอะไรบ้าง
- *  - เลือกรหัสสิทธิเอง (pttype): ติ๊กรายตัว
+ * สิทธิการรักษาที่เข้าเงื่อนไขกองทุน: ติ๊กรหัสสิทธิ (pttype) ที่ต้องการ
+ * ปุ่มกลุ่มสิทธิ (hipdata_code) ใช้กรองตาราง แล้วกด "เลือกที่แสดงทั้งหมด" เพื่อเลือกทั้งกลุ่ม
+ * ไม่เลือกเลย = ทุกสิทธิ (ยกเว้นกลุ่มที่ไม่นับเสมอ)
  */
-function PttypePicker({ list, error, value, onChange, groups, onGroupsChange, excluded }) {
+function PttypePicker({ list, error, value, onChange, excluded, note }) {
   const [filter, setFilter] = useState('');
-  const [manualRequested, setManualRequested] = useState(false);
-  const mode = value.length > 0 || manualRequested ? 'manual' : 'groups';
+  const [groupFilter, setGroupFilter] = useState([]);
   const selected = new Set(value);
   const known = new Set(list.map((p) => p.pttype));
-  const allGroups = [...new Set(list.map((p) => p.hipdata_code || ''))].filter(Boolean).sort();
-  const groupCount = (g) => list.filter((p) => p.hipdata_code === g).length;
   const usable = (p) => !excluded.includes(p.hipdata_code);
-
-  const toGroups = async () => {
-    if (value.length && !(await confirmAction({
-      title: 'เปลี่ยนเป็นเลือกตามกลุ่มสิทธิ?', text: `รหัสสิทธิที่ติ๊กไว้ ${value.length} รหัสจะถูกล้าง`, confirmText: 'เปลี่ยน',
-    }))) return;
-    onChange([]);
-    setManualRequested(false);
-  };
-  const toManual = () => {
-    // เริ่มจากรหัสสิทธิในกลุ่มที่เลือกอยู่ แล้วค่อยติ๊กออกเฉพาะที่ไม่ต้องการ
-    onChange(list.filter((p) => groups.includes(p.hipdata_code) && usable(p)).map((p) => p.pttype));
-    setManualRequested(true);
-  };
+  const allGroups = [...new Set(list.map((p) => p.hipdata_code || ''))].filter(Boolean).sort();
+  const inGroup = (g) => list.filter((p) => p.hipdata_code === g);
 
   const q = filter.trim().toLowerCase();
-  const matchText = (p) => !q || p.pttype.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)
-    || (p.hipdata_code || '').toLowerCase() === q;
-  const rows = mode === 'groups'
-    ? list.filter((p) => groups.includes(p.hipdata_code) && usable(p) && matchText(p))
-    : list.filter(matchText);
-  const groupTotal = list.filter((p) => groups.includes(p.hipdata_code) && usable(p)).length;
+  const rows = list.filter((p) => (!groupFilter.length || groupFilter.includes(p.hipdata_code))
+    && (!q || p.pttype.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)));
+  const shownUsable = rows.filter(usable).map((p) => p.pttype);
   const toggle = (code) => onChange(selected.has(code) ? value.filter((c) => c !== code) : [...value, code]);
-  const summary = mode === 'manual'
-    ? `เลือกเอง ${value.length} รหัสสิทธิ`
-    : groups.length ? `กลุ่ม ${groups.join(', ')} รวม ${groupTotal} รหัสสิทธิ` : 'ทุกสิทธิ';
+  const toggleGroup = (g) => setGroupFilter((f) => (f.includes(g) ? f.filter((x) => x !== g) : [...f, g]));
 
   return (
     <div className="panel">
-      <div className="panel-title mb-2">สิทธิการรักษาที่เข้าเงื่อนไข ({summary})</div>
-      {error && <div className="alert alert-warning py-2 small">{error}</div>}
-
-      <div className="btn-group btn-group-sm mb-2" role="radiogroup" aria-label="วิธีเลือกสิทธิ">
-        <button type="button" className={`btn ${mode === 'groups' ? 'btn-primary' : 'btn-outline-primary'}`}
-          aria-pressed={mode === 'groups'} onClick={mode === 'groups' ? undefined : toGroups}>
-          ตามกลุ่มสิทธิ (แนะนำ)
-        </button>
-        <button type="button" className={`btn ${mode === 'manual' ? 'btn-primary' : 'btn-outline-primary'}`}
-          aria-pressed={mode === 'manual'} onClick={mode === 'manual' ? undefined : toManual}>
-          เลือกรหัสสิทธิเอง
-        </button>
+      <div className="panel-title mb-1">
+        สิทธิการรักษาที่เข้าเงื่อนไข ({value.length ? `${value.length} รหัสสิทธิ` : 'ทุกสิทธิ'})
       </div>
+      <p className="small muted mb-2">
+        ติ๊กรหัสสิทธิที่ต้องการ กดปุ่มกลุ่มสิทธิเพื่อกรองตาราง แล้วกด “เลือกที่แสดงทั้งหมด” เพื่อเลือกทั้งกลุ่ม
+        ไม่เลือกเลย = ทุกสิทธิ รหัสสิทธิที่เพิ่มใหม่ใน HOSxP ภายหลังต้องมาติ๊กเพิ่ม
+      </p>
+      {error && <div className="alert alert-warning py-2 small">{error}</div>}
+      {note && <div className="alert alert-info py-2 small">{note}</div>}
 
-      {mode === 'groups' ? (
-        <>
-          <p className="small muted mb-2">
-            นับทุกรหัสสิทธิในกลุ่มที่เลือก รวมรหัสที่เพิ่มใหม่ใน HOSxP ภายหลัง ตารางด้านล่างแสดงรหัสสิทธิที่จะถูกนับ
-          </p>
-          <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
-            {allGroups.map((g) => {
-              const isExcluded = excluded.includes(g);
-              const on = groups.includes(g) && !isExcluded;
-              return (
-                <button key={g} type="button" disabled={isExcluded} className={`chip ${on ? 'active' : ''}`}
-                  onClick={() => onGroupsChange(on ? groups.filter((x) => x !== g) : [...groups, g])} aria-pressed={on}
-                  title={isExcluded ? 'ไม่นับเข้ากองทุนเสมอ (EXCLUDED_HIPDATA)' : `${groupCount(g)} รหัสสิทธิ`}>
-                  {g} <span className="opacity-75">({groupCount(g)})</span>
-                  {isExcluded && <i className="bi bi-slash-circle ms-1" aria-hidden="true" />}
-                </button>
-              );
-            })}
-          </div>
-          {groups.length === 0 && <div className="small text-warning-emphasis mb-2">ยังไม่ได้เลือกกลุ่ม: นับทุกสิทธิ (ยกเว้นกลุ่มที่ไม่นับเสมอ)</div>}
-        </>
-      ) : (
-        <p className="small muted mb-2">ติ๊กเฉพาะรหัสสิทธิที่ต้องการ รหัสที่เพิ่มใหม่ใน HOSxP ภายหลังจะไม่ถูกนับจนกว่าจะมาติ๊กเพิ่ม</p>
-      )}
-
+      <div className="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <span className="small muted">กรองกลุ่มสิทธิ:</span>
+        {allGroups.map((g) => {
+          const isExcluded = excluded.includes(g);
+          const n = inGroup(g).length;
+          const picked = inGroup(g).filter((p) => selected.has(p.pttype)).length;
+          return (
+            <button key={g} type="button" className={`chip ${groupFilter.includes(g) ? 'active' : ''}`}
+              onClick={() => toggleGroup(g)} aria-pressed={groupFilter.includes(g)}
+              title={isExcluded ? 'กลุ่มนี้ไม่นับเข้ากองทุนเสมอ (EXCLUDED_HIPDATA)' : `เลือกแล้ว ${picked} จาก ${n} รหัส`}>
+              {g} <span className="opacity-75">({isExcluded ? n : `${picked}/${n}`})</span>
+              {isExcluded && <i className="bi bi-slash-circle ms-1" aria-hidden="true" />}
+            </button>
+          );
+        })}
+        {groupFilter.length > 0 && (
+          <button type="button" className="btn btn-sm btn-link" onClick={() => setGroupFilter([])}>แสดงทุกกลุ่ม</button>
+        )}
+      </div>
       {excluded.length > 0 && (
         <p className="small muted mb-2">
           <i className="bi bi-slash-circle me-1" />
           กลุ่ม {excluded.join(', ')} ไม่นับเข้ากองทุนใดเสมอ (เช่น ชำระเงินเอง) ตั้งค่าได้ที่ EXCLUDED_HIPDATA ในไฟล์ .env
         </p>
       )}
-      {mode === 'manual' && value.filter((c) => !known.has(c)).length > 0 && list.length > 0 && (
+      {value.filter((c) => !known.has(c)).length > 0 && list.length > 0 && (
         <div className="small text-warning-emphasis mb-2">
           รหัสที่เลือกไว้แต่ไม่พบหรือเลิกใช้แล้วใน HOSxP: {value.filter((c) => !known.has(c)).join(', ')}{' '}
           <button type="button" className="btn btn-link btn-sm p-0 align-baseline" onClick={() => onChange(value.filter((c) => known.has(c)))}>นำออก</button>
         </div>
       )}
 
-      <div className="d-flex gap-2 mb-2">
-        <input className="form-control form-control-sm" placeholder="ค้นหารหัส ชื่อสิทธิ หรือกลุ่ม" value={filter}
-          onChange={(e) => setFilter(e.target.value)} aria-label="ค้นหาสิทธิ" />
-        {mode === 'manual' && (
-          <>
-            <button type="button" className="btn btn-sm btn-outline-primary text-nowrap"
-              onClick={() => onChange([...new Set([...value, ...rows.filter(usable).map((p) => p.pttype)])])} disabled={!rows.length}>
-              เลือกที่แสดงทั้งหมด
-            </button>
-            <button type="button" className="btn btn-sm btn-outline-secondary text-nowrap" onClick={() => onChange([])} disabled={!value.length}>
-              ล้าง
-            </button>
-          </>
-        )}
+      <div className="d-flex flex-wrap gap-2 mb-2">
+        <input className="form-control form-control-sm" style={{ flex: '1 1 200px' }} placeholder="ค้นหารหัสหรือชื่อสิทธิ"
+          value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="ค้นหาสิทธิ" />
+        <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" disabled={!shownUsable.length}
+          onClick={() => onChange([...new Set([...value, ...shownUsable])])}>
+          เลือกที่แสดงทั้งหมด ({shownUsable.length})
+        </button>
+        <button type="button" className="btn btn-sm btn-outline-secondary text-nowrap"
+          disabled={!rows.some((p) => selected.has(p.pttype))}
+          onClick={() => { const shown = new Set(rows.map((p) => p.pttype)); onChange(value.filter((c) => !shown.has(c))); }}>
+          ยกเลิกที่แสดง
+        </button>
+        <button type="button" className="btn btn-sm btn-link text-nowrap" disabled={!value.length} onClick={() => onChange([])}>
+          ล้างทั้งหมด
+        </button>
       </div>
       <div className="scroll-box">
         <table className="table table-sm table-hover data-table">
-          <thead><tr>{mode === 'manual' && <th />}<th>รหัส</th><th>ชื่อสิทธิ</th><th>กลุ่ม</th></tr></thead>
+          <thead><tr><th /><th>รหัส</th><th>ชื่อสิทธิ</th><th>กลุ่ม</th></tr></thead>
           <tbody>
             {rows.map((p) => (
-              <tr key={p.pttype} onClick={mode === 'manual' && usable(p) ? () => toggle(p.pttype) : undefined}
-                style={mode === 'manual' && usable(p) ? { cursor: 'pointer' } : undefined}
-                className={usable(p) ? '' : 'muted'}>
-                {mode === 'manual' && (
-                  <td style={{ width: 36 }}>
-                    <input type="checkbox" className="form-check-input" checked={selected.has(p.pttype)} readOnly
-                      disabled={!usable(p)} aria-label={`เลือกสิทธิ ${p.pttype} ${p.name}`} />
-                  </td>
-                )}
+              <tr key={p.pttype} onClick={usable(p) ? () => toggle(p.pttype) : undefined}
+                style={usable(p) ? { cursor: 'pointer' } : undefined} className={usable(p) ? '' : 'muted'}>
+                <td style={{ width: 36 }}>
+                  <input type="checkbox" className="form-check-input" checked={selected.has(p.pttype)} readOnly
+                    disabled={!usable(p)} aria-label={`เลือกสิทธิ ${p.pttype} ${p.name}`} />
+                </td>
                 <td style={{ width: 60 }}>{p.pttype}</td>
                 <td className="wrap">{p.name}</td>
                 <td className="small-id">{p.hipdata_code}</td>
               </tr>
             ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={4} className="muted text-center py-3">
-                {mode === 'groups' && !groups.length ? 'เลือกกลุ่มสิทธิด้านบนเพื่อดูรหัสสิทธิที่จะถูกนับ' : 'ไม่พบสิทธิ'}
-              </td></tr>
-            )}
+            {rows.length === 0 && <tr><td colSpan={4} className="muted text-center py-3">ไม่พบสิทธิ</td></tr>}
           </tbody>
         </table>
       </div>
@@ -164,6 +142,7 @@ export default function FundSettingsPage() {
   const [results, setResults] = useState(null);
   const [searching, setSearching] = useState(false);
   const [pttypeList, setPttypeList] = useState([]);
+  const [pttypeNote, setPttypeNote] = useState(null);
   const [excludedHipdata, setExcludedHipdata] = useState([]);
   const [pttypeError, setPttypeError] = useState('');
 
@@ -182,14 +161,27 @@ export default function FundSettingsPage() {
   const open = async (code) => {
     if (!(await confirmDiscard())) return;
     setResults(null);
-    if (!code) { setForm(blankFund()); setDirty(false); return; }
+    const codesOf = (groups) => pttypeList
+      .filter((p) => groups.includes(p.hipdata_code) && !excludedHipdata.includes(p.hipdata_code)).map((p) => p.pttype);
+    if (!code) {
+      setForm({ ...blankFund(), pttypes: codesOf(['UCS']), hipdata_codes: [] });
+      setPttypeNote(null);
+      setDirty(false);
+      return;
+    }
     try {
       const { data } = await api.get(`/funds/${code}`);
+      // กองทุนที่ตั้งไว้แบบกลุ่มสิทธิ (รุ่นก่อน): ติ๊กรหัสสิทธิในกลุ่มนั้นให้ เมื่อบันทึกจะเก็บเป็นรายการรหัส
+      const legacyGroups = !(data.pttypes || []).length && (data.hipdata_codes || []).length && !data.track_only
+        ? data.hipdata_codes : null;
+      setPttypeNote(legacyGroups && pttypeList.length
+        ? `กองทุนนี้ตั้งไว้แบบกลุ่มสิทธิ ${legacyGroups.join(', ')} ระบบติ๊กรหัสสิทธิในกลุ่มนั้นให้แล้ว เมื่อกดบันทึกจะเก็บเป็นรายการรหัสสิทธิ`
+        : null);
       setForm({
         originalCode: data.code, code: data.code, name: data.name, sort_order: data.sort_order,
         is_active: data.is_active, columnsText: (data.stm_columns || []).join('\n'), items: data.items,
-        pttypes: data.pttypes || [],
-        hipdata_codes: data.hipdata_codes || [],
+        pttypes: legacyGroups && pttypeList.length ? codesOf(legacyGroups) : (data.pttypes || []),
+        hipdata_codes: legacyGroups && !pttypeList.length ? legacyGroups : [],
         track_only: !!data.track_only,
         match_mode: data.match_mode || 'items',
         icd10Text: (data.icd10_codes || []).join(', '),
@@ -232,15 +224,19 @@ export default function FundSettingsPage() {
   });
 
   const save = async () => {
+    if (!form.track_only && form.match_mode === 'icd' && !parseIcd(form.icd10Text).length) {
+      return showError('วิธีคัดแบบ ICD-10 ต้องใส่รหัสโรคอย่างน้อย 1 รายการ');
+    }
     const body = {
       code: form.code, name: form.name, sort_order: Number(form.sort_order) || 0, is_active: form.is_active,
       stm_columns: form.columnsText.split('\n').map((s) => s.trim()).filter(Boolean),
       items: form.items,
       pttypes: form.pttypes,
-      hipdata_codes: form.hipdata_codes,
+      // รายการรหัสสิทธิเป็นตัวกำหนด (ไม่ใช้กลุ่มสิทธิแล้ว) ยกเว้นยังโหลดรายการสิทธิจาก HOSxP ไม่ได้
+      hipdata_codes: pttypeList.length ? [] : form.hipdata_codes,
       track_only: form.track_only,
       match_mode: form.match_mode,
-      icd10_codes: parseIcd(form.icd10Text),
+      icd10_codes: form.match_mode === 'rights' ? [] : parseIcd(form.icd10Text),
       icd10_scope: form.icd10_scope,
       target_send: form.target_send, target_success: form.target_success, target_complete: form.target_complete,
     };
@@ -283,7 +279,7 @@ export default function FundSettingsPage() {
       <div className="page-head">
         <div>
           <h1>ตั้งค่ากองทุน</h1>
-          <p>visit จะนับเข้ากองทุนเมื่อมีรายการค่าบริการหรือยาที่ตั้งไว้อย่างน้อย 1 รายการ และสิทธิการรักษาอยู่ในกลุ่มหรือรหัสที่เลือก</p>
+          <p>แต่ละกองทุนเลือกวิธีคัด visit ได้ 3 แบบ: ค่าบริการ, สิทธิการรักษา หรือ ICD-10 และกรองด้วยสิทธิการรักษาที่เลือก</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => open(null)}>
           <i className="bi bi-plus-lg me-1" />เพิ่มกองทุน
@@ -299,14 +295,14 @@ export default function FundSettingsPage() {
                 onClick={() => open(f.code)}>
                 <div className="d-flex justify-content-between">
                   <strong>{f.code}</strong>
-                  <span className={f.item_count || f.track_only || f.match_mode === 'rights' ? 'small muted' : 'small text-warning-emphasis'}>
-                    {f.track_only ? 'ติดตามยอดรับ' : f.match_mode === 'rights' ? 'คัดตามสิทธิ' : f.item_count ? `${f.item_count} รายการ` : 'ยังไม่มีรายการ'}
+                  <span className={f.item_count || f.track_only || f.match_mode !== 'items' ? 'small muted' : 'small text-warning-emphasis'}>
+                    {f.track_only ? 'ติดตามยอดรับ' : f.match_mode === 'rights' ? 'คัดตามสิทธิ' : f.match_mode === 'icd' ? 'คัดตาม ICD-10' : f.item_count ? `${f.item_count} รายการ` : 'ยังไม่มีรายการ'}
                   </span>
                 </div>
                 <div className="small">{f.name}{!f.is_active && <span className="muted"> (ปิดใช้งาน)</span>}</div>
                 {!f.track_only && (
                   <div className="small-id">
-                    {f.pttypes?.length ? `สิทธิ ${f.pttypes.join(', ')}` : f.hipdata_codes?.length ? `กลุ่ม ${f.hipdata_codes.join(', ')}` : 'ทุกสิทธิ'}
+                    {f.pttypes?.length ? `${f.pttypes.length} รหัสสิทธิ` : f.hipdata_codes?.length ? `กลุ่ม ${f.hipdata_codes.join(', ')}` : 'ทุกสิทธิ'}
                   </div>
                 )}
               </button>
@@ -379,37 +375,42 @@ export default function FundSettingsPage() {
               {!form.track_only && (<>
               <div className="panel">
                 <div className="panel-title mb-2">วิธีคัด visit เข้ากองทุน</div>
-                <div className="d-flex flex-column gap-1">
-                  {[
-                    ['items', 'มีรายการค่าบริการ/ยาที่ตั้งไว้อย่างน้อย 1 รายการ และสิทธิตรงเงื่อนไข', 'เช่น HC, AE, INST'],
-                    ['rights', 'ทุก visit ของสิทธิที่เลือก ที่มียอดเรียกเก็บใน HOSxP (ไม่ต้องตั้งรายการ)', 'เช่น OFC ยอดตั้งเบิกใช้ยอดเรียกเก็บของ visit (uc_money)'],
-                  ].map(([v, label, hint]) => (
-                    <div className="form-check" key={v}>
-                      <input id={`mm-${v}`} type="radio" name="match_mode" className="form-check-input" checked={form.match_mode === v}
+                <div className="match-modes" role="radiogroup" aria-label="วิธีคัด visit เข้ากองทุน">
+                  {MATCH_MODES.map(([v, label, hint, icon]) => (
+                    <label key={v} className={`match-mode ${form.match_mode === v ? 'active' : ''}`}>
+                      <input type="radio" name="match_mode" className="visually-hidden" checked={form.match_mode === v}
                         onChange={() => update({ match_mode: v })} />
-                      <label className="form-check-label" htmlFor={`mm-${v}`}>{label} <span className="small muted">({hint})</span></label>
-                    </div>
+                      <i className={`bi ${icon}`} aria-hidden="true" />
+                      <span><span className="title">{label}</span><span className="desc">{hint}</span></span>
+                    </label>
                   ))}
                 </div>
+                <div className="small muted mt-2">ทุกแบบกรองด้วยสิทธิการรักษาที่เลือกด้านล่าง</div>
               </div>
 
-              <PttypePicker key={form.originalCode || 'new'} list={pttypeList} error={pttypeError} value={form.pttypes} onChange={(pttypes) => update({ pttypes })}
-                groups={form.hipdata_codes} onGroupsChange={(hipdata_codes) => update({ hipdata_codes })} excluded={excludedHipdata} />
+              <PttypePicker key={form.originalCode || 'new'} list={pttypeList} error={pttypeError} value={form.pttypes}
+                onChange={(pttypes) => update({ pttypes })} excluded={excludedHipdata} note={pttypeNote} />
 
+              {form.match_mode !== 'rights' && (
               <div className="panel">
                 <div className="panel-title mb-1">
-                  เงื่อนไขรหัสโรค ICD-10 ({parseIcd(form.icd10Text).length ? `${parseIcd(form.icd10Text).length} รหัส` : 'ไม่กรอง'})
+                  {form.match_mode === 'icd' ? 'รหัสโรค ICD-10 ที่นับเข้ากองทุน' : 'กรองเพิ่มด้วยรหัสโรค ICD-10'} ({parseIcd(form.icd10Text).length ? `${parseIcd(form.icd10Text).length} รายการ` : 'ไม่กรอง'})
                 </div>
                 <p className="small muted mb-2">
-                  ใช้ร่วมกับเงื่อนไขด้านบน visit ต้องมีรหัสโรคตรงอย่างน้อย 1 รหัส ใส่รหัสเต็มหรือขึ้นต้นก็ได้ เช่น H25 นับ H250 ถึง H259
-                  มีหรือไม่มีจุดก็ได้ คั่นด้วยเว้นวรรค จุลภาค หรือขึ้นบรรทัดใหม่ เว้นว่างไว้ถ้าไม่ต้องการกรองรหัสโรค
+                  {form.match_mode === 'icd' ? 'ต้องใส่อย่างน้อย 1 รายการ ' : 'ไม่บังคับ ใช้ร่วมกับรายการค่าบริการ '}
+                  visit ต้องมีรหัสโรคตรงอย่างน้อย 1 รายการ ใส่ได้ทั้งรหัสเดี่ยวและช่วง
+                  เช่น <code>H25</code> นับ H250 ถึง H259, <code>C00-C96</code> นับทุกรหัสตั้งแต่ C000 ถึง C969
+                  มีหรือไม่มีจุดก็ได้ คั่นแต่ละรายการด้วยจุลภาค เว้นวรรค หรือขึ้นบรรทัดใหม่
                 </p>
-                <textarea className="form-control mb-2" rows={2} value={form.icd10Text} placeholder="เช่น H25, H26.9, Z51.5"
+                <textarea className="form-control mb-2" rows={2} value={form.icd10Text} placeholder="เช่น C00-C96, D37-D48, Z51.5"
                   onChange={(e) => update({ icd10Text: e.target.value })} aria-label="รหัส ICD-10" />
                 {parseIcd(form.icd10Text).length > 0 && (
                   <div className="d-flex flex-wrap gap-1 mb-2">
                     {parseIcd(form.icd10Text).map((c) => (
-                      <span key={c} className={`badge ${/^[A-Z][0-9][0-9A-Z]{0,5}$/.test(c) ? 'text-bg-light border' : 'text-bg-danger'}`}>{c}</span>
+                      <span key={c} className={`badge ${icdValid(c) ? 'text-bg-light border' : 'text-bg-danger'}`}
+                        title={icdValid(c) ? (c.includes('-') ? `ช่วง ${c.replace('-', ' ถึง ')}` : `ขึ้นต้นด้วย ${c}`) : 'รูปแบบไม่ถูกต้อง (ช่วงต้องเรียงจากน้อยไปมาก)'}>
+                        {c.includes('-') ? c.replace('-', ' – ') : c}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -423,6 +424,7 @@ export default function FundSettingsPage() {
                   ))}
                 </div>
               </div>
+              )}
 
               {form.match_mode === 'items' && (
               <div className="panel">

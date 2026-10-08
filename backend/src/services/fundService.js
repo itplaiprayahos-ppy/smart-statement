@@ -41,15 +41,26 @@ const RIGHTS_OK = `
     ELSE TRUE
   END`;
 
-/** เงื่อนไขรหัสโรค (ICD-10) ของกองทุน: ว่าง = ไม่กรอง, ขึ้นต้นด้วยรหัสที่กำหนด */
+/**
+ * รหัสโรค (col) ตรงกับเงื่อนไข ICD-10 ของกองทุนอย่างน้อย 1 รายการ
+ *  - "H25"      : ขึ้นต้นด้วย H25
+ *  - "C00-C96"  : ช่วง เทียบตามความยาวของรหัสที่ใส่ (C00-C96 = C000 ถึง C969)
+ * เทียบสตริงแบบ COLLATE "C" ให้ลำดับตัวอักษร/ตัวเลขคงที่ทุกการตั้งค่าภาษาของฐานข้อมูล
+ */
+const icdMatch = (col) => `EXISTS (
+  SELECT 1 FROM jsonb_array_elements_text(f.icd10_codes) c
+  WHERE CASE WHEN position('-' in c.value) > 0
+    THEN left(${col}, length(split_part(c.value, '-', 1))) COLLATE "C" >= split_part(c.value, '-', 1) COLLATE "C"
+     AND left(${col}, length(split_part(c.value, '-', 2))) COLLATE "C" <= split_part(c.value, '-', 2) COLLATE "C"
+    ELSE ${col} LIKE c.value || '%'
+  END)`;
+
+/** เงื่อนไขรหัสโรค (ICD-10) ของกองทุน: ว่าง = ไม่กรอง */
 const ICD_OK = `
   (jsonb_array_length(f.icd10_codes) = 0
-   OR (f.icd10_scope = 'pdx' AND EXISTS (
-         SELECT 1 FROM jsonb_array_elements_text(f.icd10_codes) c
-         WHERE upper(replace(COALESCE(v.pdx, ''), '.', '')) LIKE c.value || '%'))
+   OR (f.icd10_scope = 'pdx' AND ${icdMatch("upper(replace(COALESCE(v.pdx, ''), '.', ''))")})
    OR (f.icd10_scope = 'any' AND EXISTS (
-         SELECT 1 FROM his_opd_dx d, jsonb_array_elements_text(f.icd10_codes) c
-         WHERE d.vn = v.vn AND d.icd10 LIKE c.value || '%')))`;
+         SELECT 1 FROM his_opd_dx d WHERE d.vn = v.vn AND ${icdMatch('d.icd10')})))`;
 
 function fundCte() {
   return `${baseCte('claim')},
@@ -72,11 +83,18 @@ function fundCte() {
       AND ($5::text IS NULL OR fi.fund_code = $5)
     GROUP BY i.vn, fi.fund_code
     UNION ALL
-    SELECT v.vn, f.code, v.uc_money, 'ทุก visit ของสิทธิที่ตั้งค่า', ARRAY[]::text[]
+    SELECT v.vn, f.code, v.uc_money,
+           CASE WHEN f.match_mode = 'icd' THEN 'ICD-10: ' || COALESCE(
+                  CASE WHEN f.icd10_scope = 'pdx' THEN upper(replace(v.pdx, '.', ''))
+                       ELSE (SELECT string_agg(d.icd10, ', ' ORDER BY d.diagtype, d.icd10)
+                               FROM his_opd_dx d WHERE d.vn = v.vn AND ${icdMatch('d.icd10')}) END, '')
+                ELSE 'ทุก visit ของสิทธิที่ตั้งค่า' END,
+           ARRAY[]::text[]
     FROM his_opd_visits v
-    JOIN funds f ON f.is_active AND NOT f.track_only AND f.match_mode = 'rights'
+    JOIN funds f ON f.is_active AND NOT f.track_only AND f.match_mode IN ('rights', 'icd')
     WHERE v.vstdate BETWEEN $1 AND $2
       AND COALESCE(v.uc_money, 0) > 0
+      AND (f.match_mode <> 'icd' OR jsonb_array_length(f.icd10_codes) > 0)
       AND ${RIGHTS_OK}
       AND ${ICD_OK}
       ${EXCLUDED_SQL}
@@ -107,7 +125,7 @@ function fundCte() {
            CASE
              WHEN f.track_only THEN 'ติดตามยอดรับ'
              WHEN r.vn IS NULL THEN 'ไม่พบ visit ใน HOSxP'
-             WHEN f.match_mode = 'rights' THEN 'สิทธิหรือรหัสโรคไม่อยู่ในเงื่อนไขกองทุน หรือไม่มียอดเรียกเก็บใน HOSxP'
+             WHEN f.match_mode IN ('rights', 'icd') THEN 'สิทธิหรือรหัสโรคไม่อยู่ในเงื่อนไขกองทุน หรือไม่มียอดเรียกเก็บใน HOSxP'
              WHEN EXISTS (SELECT 1 FROM his_opd_items i JOIN fund_items fi ON fi.icode = i.icode
                           WHERE i.vn = r.vn AND fi.fund_code = kv.key)
                THEN 'สิทธิหรือรหัสโรคไม่อยู่ในเงื่อนไขกองทุน'

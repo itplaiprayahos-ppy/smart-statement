@@ -261,3 +261,16 @@ body { font-size: 0.95rem; line-height: 1.6; }
 /* ---------- รายละเอียดรหัสข้อผิดพลาด ---------- */
 .error-detail { font-size: 0.82rem; line-height: 1.45; }
 .error-detail .guidance { color: var(--cr-muted); margin-top: 0.2rem; }
+
+/* ---------- วิธีคัด visit เข้ากองทุน ---------- */
+.match-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem; }
+.match-mode {
+  display: flex; gap: 0.6rem; align-items: flex-start; cursor: pointer;
+  border: 1px solid var(--cr-line); border-radius: 0.5rem; padding: 0.65rem 0.8rem; background: #fff;
+}
+.match-mode:hover { background: #f8faf9; }
+.match-mode.active { border-color: var(--cr-primary); box-shadow: inset 0 0 0 1px var(--cr-primary); background: #eef5f4; }
+.match-mode > i { font-size: 1.2rem; color: var(--cr-primary); line-height: 1.2; }
+.match-mode .title { display: block; font-weight: 600; }
+.match-mode .desc { display: block; font-size: 0.8rem; color: var(--cr-muted); }
+.match-mode:has(input:focus-visible) { outline: 2px solid var(--cr-accent); outline-offset: 2px; }

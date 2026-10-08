@@ -158,7 +158,7 @@ export default function DashboardPage() {
                   <tr key={f.code} onClick={isExec ? undefined : () => navigate('/recon/funds')}
                     title={isExec ? undefined : 'เปิดหน้าแยกกองทุน'}>
                     <td><strong>{f.code}</strong> <span className="muted">{f.name}</span>
-                      {f.item_count === 0 && !f.track_only && f.match_mode !== 'rights' && <div className="small text-warning-emphasis">ยังไม่ได้ตั้งค่ารายการ</div>}
+                      {f.item_count === 0 && !f.track_only && f.match_mode === 'items' && <div className="small text-warning-emphasis">ยังไม่ได้ตั้งค่ารายการ</div>}
                     </td>
                     <td>{f.responsible || <span className={f.track_only ? 'muted small' : 'text-warning-emphasis small'}>ยังไม่กำหนด</span>}</td>
                     {f.track_only ? (
