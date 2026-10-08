@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client.js';
+import SortTh from './SortTh.jsx';
+import { useSort } from '../hooks/useSort.js';
 import { showError } from '../utils/alert.js';
 import { int, money } from '../utils/format.js';
 
@@ -36,6 +38,17 @@ export default function FundItemAnalysis({ mode, params, fundCode, onShowMissing
     return () => { alive = false; };
   }, [params, fundCode]);
 
+  // hooks ต้องเรียกก่อน return ใด ๆ
+  const commonRows = useMemo(() => (data ? data.common.filter((c) => c.fund_code === fundCode) : []), [data, fundCode]);
+  const itemSort = useSort(data?.items, undefined, {
+    name: (it) => it.item_name || it.icode, rate: (it) => (it.visits ? it.paid / it.visits : null), amount: (it) => Number(it.amount),
+  });
+  const commonSort = useSort(commonRows, undefined, {
+    name: (c) => c.item_name || c.icode, paid: (c) => Number(c.paid_rate),
+    fail: (c) => (c.fail_rate === null ? null : Number(c.fail_rate)),
+    gap: (c) => (c.fail_rate === null ? null : Number(c.paid_rate) - Number(c.fail_rate)),
+  });
+
   if (!fundCode) {
     return <p className="muted mb-0 py-3">เลือกกองทุนจากตาราง “สรุปรายกองทุน” ด้านบนก่อน (คลิกที่แถว)</p>;
   }
@@ -55,19 +68,19 @@ export default function FundItemAnalysis({ mode, params, fundCode, onShowMissing
           <table className="table table-sm table-hover data-table">
             <thead>
               <tr>
-                <th>รายการ</th>
-                <th>ประเภท</th>
-                <th className="num">visit</th>
-                <th className="num">ได้รับเงิน</th>
-                <th className="num">ไม่ได้รับเงินกองทุนนี้</th>
-                <th className="num">ถูกปฏิเสธ</th>
-                <th className="num">ไม่พบใน REP</th>
-                <th>อัตราได้รับเงิน</th>
-                <th className="num">ยอดตั้งเบิก</th>
+                <SortTh k="name" sort={itemSort.sort} onSort={itemSort.toggle}>รายการ</SortTh>
+                <SortTh k="source" sort={itemSort.sort} onSort={itemSort.toggle}>ประเภท</SortTh>
+                <SortTh k="visits" sort={itemSort.sort} onSort={itemSort.toggle} className="num">visit</SortTh>
+                <SortTh k="paid" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ได้รับเงิน</SortTh>
+                <SortTh k="not_paid" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ไม่ได้รับเงินกองทุนนี้</SortTh>
+                <SortTh k="denied" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ถูกปฏิเสธ</SortTh>
+                <SortTh k="not_sent" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ไม่พบใน REP</SortTh>
+                <SortTh k="rate" sort={itemSort.sort} onSort={itemSort.toggle}>อัตราได้รับเงิน</SortTh>
+                <SortTh k="amount" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ยอดตั้งเบิก</SortTh>
               </tr>
             </thead>
             <tbody>
-              {data.items.map((it) => (
+              {itemSort.sorted.map((it) => (
                 <tr key={it.icode} className={it.visits ? '' : 'muted'}>
                   <td className="wrap">
                     {it.item_name || it.icode}
@@ -93,7 +106,7 @@ export default function FundItemAnalysis({ mode, params, fundCode, onShowMissing
 
   // ---------- แบบ C ----------
   const { minPaid, commonRate } = data.thresholds;
-  const rows = data.common.filter((c) => c.fund_code === fundCode);
+  const rows = commonSort.sorted;
   return (
     <>
       <p className="small muted">
@@ -114,11 +127,11 @@ export default function FundItemAnalysis({ mode, params, fundCode, onShowMissing
             <table className="table table-sm table-hover data-table">
               <thead>
                 <tr>
-                  <th>รายการ</th>
-                  <th>ตั้งค่าในกองทุน</th>
-                  <th>พบในเคสได้รับเงิน</th>
-                  <th>พบในเคสไม่สำเร็จ</th>
-                  <th className="num">ส่วนต่าง</th>
+                  <SortTh k="name" sort={commonSort.sort} onSort={commonSort.toggle}>รายการ</SortTh>
+                  <SortTh k="configured" sort={commonSort.sort} onSort={commonSort.toggle}>ตั้งค่าในกองทุน</SortTh>
+                  <SortTh k="paid" sort={commonSort.sort} onSort={commonSort.toggle}>พบในเคสได้รับเงิน</SortTh>
+                  <SortTh k="fail" sort={commonSort.sort} onSort={commonSort.toggle}>พบในเคสไม่สำเร็จ</SortTh>
+                  <SortTh k="gap" sort={commonSort.sort} onSort={commonSort.toggle} className="num">ส่วนต่าง</SortTh>
                 </tr>
               </thead>
               <tbody>

@@ -491,3 +491,6 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
   }
   return result;
 }
+
+// ใช้ร่วมกับตัวอ่านไฟล์ทะเบียน
+export { text, parseMoney, norm };

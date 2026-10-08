@@ -4,6 +4,8 @@ import Pagination from '../components/Pagination.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
 import Diff from '../components/Diff.jsx';
 import StatusChart from '../components/StatusChart.jsx';
+import SortTh from '../components/SortTh.jsx';
+import { useSortState } from '../hooks/useSort.js';
 import { confirmAction, notifySuccess, showError, withLoading } from '../utils/alert.js';
 import {
   FUNDS, PERIODS, STATUS_META, STATUS_ORDER, daysInRange, int, lastMonthRange,
@@ -24,6 +26,8 @@ export default function ReconOpdPage() {
   const [loading, setLoading] = useState(false);
   const [lastPull, setLastPull] = useState(null);
   const [showChart, setShowChart] = useState(false);
+  const [sort, toggleSort] = useSortState();
+  const onSort = (k) => { toggleSort(k); setPage(1); };
 
   const params = useMemo(() => ({
     dateFrom: filters.dateFrom,
@@ -33,7 +37,9 @@ export default function ReconOpdPage() {
     onlyClaimable: filters.onlyClaimable ? '1' : '0',
     status: status || undefined,
     search: search || undefined,
-  }), [filters, status, search]);
+    sort: sort.key || undefined,
+    dir: sort.key ? sort.dir : undefined,
+  }), [filters, status, search, sort]);
 
   const rangeError = rangeErrorOf(filters);
 
@@ -224,17 +230,17 @@ export default function ReconOpdPage() {
           <table className="table table-hover data-table">
             <thead>
               <tr>
-                <th>สถานะ</th>
-                <th>วันที่รับบริการ</th>
-                <th>HN / VN</th>
-                <th>ผู้ป่วย</th>
-                <th>สิทธิ</th>
-                <th className="num">ยอด HOSxP</th>
-                <th className="num">เรียกเก็บ (สปสช.)</th>
-                <th className="num">ผลต่าง</th>
-                <th className="num">ชดเชย</th>
-                <th>REP / TRAN_ID</th>
-                <th>รหัสข้อผิดพลาด</th>
+                <SortTh k="status" sort={sort} onSort={onSort}>สถานะ</SortTh>
+                <SortTh k="sdate" sort={sort} onSort={onSort}>วันที่รับบริการ</SortTh>
+                <SortTh k="hn" sort={sort} onSort={onSort}>HN / VN</SortTh>
+                <SortTh k="patient" sort={sort} onSort={onSort}>ผู้ป่วย</SortTh>
+                <SortTh k="pttype" sort={sort} onSort={onSort}>สิทธิ</SortTh>
+                <SortTh k="his" sort={sort} onSort={onSort} className="num">ยอด HOSxP</SortTh>
+                <SortTh k="claim" sort={sort} onSort={onSort} className="num">เรียกเก็บ (สปสช.)</SortTh>
+                <SortTh k="diff" sort={sort} onSort={onSort} className="num">ผลต่าง</SortTh>
+                <SortTh k="comp" sort={sort} onSort={onSort} className="num">ชดเชย</SortTh>
+                <SortTh k="rep" sort={sort} onSort={onSort}>REP / TRAN_ID</SortTh>
+                <SortTh k="error" sort={sort} onSort={onSort}>รหัสข้อผิดพลาด</SortTh>
                 <th>รายละเอียดข้อผิดพลาด</th>
               </tr>
             </thead>

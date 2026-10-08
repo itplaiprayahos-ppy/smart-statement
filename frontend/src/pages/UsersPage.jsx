@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api/client.js';
+import SortTh from '../components/SortTh.jsx';
+import { useSort } from '../hooks/useSort.js';
 import Modal from '../components/Modal.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Swal, notifySuccess, showError } from '../utils/alert.js';
@@ -13,6 +15,7 @@ export default function UsersPage() {
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [funds, setFunds] = useState([]);
+  const userSort = useSort(users, undefined, { fund_codes: (u) => (u.fund_codes || []).join(','), is_active: (u) => !u.is_active });
 
   const load = useCallback(() => {
     api.get('/users').then((r) => setUsers(r.data)).catch(showError);
@@ -81,9 +84,9 @@ export default function UsersPage() {
       <div className="panel">
         <div className="table-wrap">
           <table className="table table-hover data-table">
-            <thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ-สกุล</th><th>สิทธิ์</th><th>กองทุนที่รับผิดชอบ</th><th>สถานะ</th><th>เข้าใช้ล่าสุด</th><th /></tr></thead>
+            <thead><tr><SortTh k="username" sort={userSort.sort} onSort={userSort.toggle}>ชื่อผู้ใช้</SortTh><SortTh k="full_name" sort={userSort.sort} onSort={userSort.toggle}>ชื่อ-สกุล</SortTh><SortTh k="role" sort={userSort.sort} onSort={userSort.toggle}>สิทธิ์</SortTh><SortTh k="fund_codes" sort={userSort.sort} onSort={userSort.toggle}>กองทุนที่รับผิดชอบ</SortTh><SortTh k="is_active" sort={userSort.sort} onSort={userSort.toggle}>สถานะ</SortTh><SortTh k="last_login_at" sort={userSort.sort} onSort={userSort.toggle}>เข้าใช้ล่าสุด</SortTh><th /></tr></thead>
             <tbody>
-              {users.map((u) => (
+              {userSort.sorted.map((u) => (
                 <tr key={u.id}>
                   <td>{u.username}{u.id === me.id && <span className="small-id"> (คุณ)</span>}</td>
                   <td>{u.full_name || '–'}</td>

@@ -202,7 +202,10 @@ export async function pullOpd({ dateFrom, dateTo, userId }) {
   // icode ทั้งหมดที่ตั้งค่าไว้ในกองทุนที่เปิดใช้งาน
   const { rows: icodeRows } = await db.query(
     `SELECT DISTINCT fi.icode FROM fund_items fi JOIN funds f ON f.code = fi.fund_code
-     WHERE f.is_active AND NOT f.track_only`,
+     WHERE f.is_active AND NOT f.track_only
+     UNION
+     -- รายการที่อยู่ในทะเบียนของหน้างาน ให้ดึงด้วยเพื่อเทียบ 3 แหล่ง
+     SELECT DISTINCT icode FROM registry_rows WHERE icode IS NOT NULL`,
   );
   const icodes = icodeRows.map((r) => r.icode);
 

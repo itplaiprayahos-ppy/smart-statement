@@ -4,6 +4,7 @@ import { audit } from '../utils/audit.js';
 import { exportOpd, reconcileOpd, STATUSES } from '../services/reconService.js';
 import { analyzeFundItems, exportFunds, FUND_STATUSES, reconcileFunds } from '../services/fundService.js';
 import { readDateRange } from './his.routes.js';
+import { readSort } from '../utils/sort.js';
 
 const router = Router();
 
@@ -20,6 +21,7 @@ function readOptions(q) {
     search: q.search || null,
     page: q.page,
     pageSize: q.pageSize,
+    ...readSort(q),
   };
 }
 

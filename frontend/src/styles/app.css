@@ -274,3 +274,38 @@ body { font-size: 0.95rem; line-height: 1.6; }
 .match-mode .title { display: block; font-weight: 600; }
 .match-mode .desc { display: block; font-size: 0.8rem; color: var(--cr-muted); }
 .match-mode:has(input:focus-visible) { outline: 2px solid var(--cr-accent); outline-offset: 2px; }
+
+/* ---------- เทียบ 3 แหล่ง ---------- */
+.compare-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 0.5rem; margin-bottom: 1rem; }
+.cmp-chip {
+  display: flex; flex-direction: column; align-items: flex-start; text-align: left;
+  border: 1px solid var(--cr-line); border-left: 4px solid var(--c, var(--cr-primary));
+  border-radius: 0.5rem; background: #fff; padding: 0.5rem 0.7rem;
+}
+.cmp-chip .n { font-size: 1.25rem; font-weight: 600; color: var(--c, var(--cr-primary)); font-variant-numeric: tabular-nums; }
+.cmp-chip .t { font-size: 0.78rem; color: var(--cr-muted); line-height: 1.3; }
+.cmp-chip:hover:not(:disabled) { background: #f8faf9; }
+.cmp-chip.active { box-shadow: inset 0 0 0 2px var(--c, var(--cr-primary)); }
+.cmp-chip:disabled { opacity: 0.45; }
+.compare-table .src-head { width: 92px; text-align: center; }
+.compare-table .src-cell { white-space: nowrap; }
+.compare-table .src-cell i { margin-right: 0.25rem; }
+.compare-table .src-cell.ok { color: var(--st-matched); }
+.compare-table .src-cell.no { color: var(--st-denied); }
+.compare-table .src-cell .note { font-size: 0.75rem; }
+.cmp-status { color: var(--c); font-weight: 600; font-size: 0.88rem; }
+.match-item { border-bottom: 1px solid var(--cr-line); padding: 0.6rem 0; }
+.match-item:last-child { border-bottom: 0; }
+
+/* ---------- หัวคอลัมน์กดเรียง ---------- */
+th.sortable { padding: 0; }
+th.sortable .th-sort {
+  all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 0.3rem; width: 100%;
+  padding: 0.5rem 0.5rem; cursor: pointer; font: inherit; color: inherit; white-space: nowrap;
+}
+th.sortable.num .th-sort { justify-content: flex-end; }
+th.sortable.text-center .th-sort, th.sortable.src-head .th-sort { justify-content: center; }
+th.sortable .th-sort i { font-size: 0.7rem; opacity: 0.35; }
+th.sortable .th-sort:hover i, th.sortable.sorted .th-sort i { opacity: 1; }
+th.sortable.sorted { color: var(--cr-primary); }
+th.sortable .th-sort:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: -2px; }

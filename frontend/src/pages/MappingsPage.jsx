@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api/client.js';
+import SortTh from '../components/SortTh.jsx';
+import { useSort } from '../hooks/useSort.js';
 import Modal from '../components/Modal.jsx';
 import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
 import { thaiDateTime } from '../utils/format.js';
@@ -12,6 +14,7 @@ const emptyForm = (fields) => ({
 
 export default function MappingsPage() {
   const [items, setItems] = useState([]);
+  const mapSort = useSort(items, undefined, { is_active: (m) => !m.is_active });
   const [fields, setFields] = useState({});
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -89,9 +92,9 @@ export default function MappingsPage() {
       <div className="panel">
         <div className="table-wrap">
           <table className="table table-hover data-table">
-            <thead><tr><th>ชื่อ</th><th>ประเภท</th><th>แถวหัวตาราง</th><th>สถานะ</th><th>แก้ไขล่าสุด</th><th /></tr></thead>
+            <thead><tr><SortTh k="name" sort={mapSort.sort} onSort={mapSort.toggle}>ชื่อ</SortTh><SortTh k="claim_type" sort={mapSort.sort} onSort={mapSort.toggle}>ประเภท</SortTh><SortTh k="header_row" sort={mapSort.sort} onSort={mapSort.toggle}>แถวหัวตาราง</SortTh><SortTh k="is_active" sort={mapSort.sort} onSort={mapSort.toggle}>สถานะ</SortTh><SortTh k="updated_at" sort={mapSort.sort} onSort={mapSort.toggle}>แก้ไขล่าสุด</SortTh><th /></tr></thead>
             <tbody>
-              {items.map((m) => (
+              {mapSort.sorted.map((m) => (
                 <tr key={m.id}>
                   <td>{m.name}</td>
                   <td>{m.claim_type}</td>

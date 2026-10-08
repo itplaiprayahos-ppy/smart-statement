@@ -1,6 +1,14 @@
 import * as XLSX from 'xlsx';
 import { db } from '../config/db.js';
 import { annotateErrors } from './errorCodeService.js';
+import { orderBy } from '../utils/sort.js';
+
+/** คอลัมน์ที่กดเรียงได้ในหน้ากระทบยอด OPD */
+const OPD_SORT = {
+  status: 'status', sdate: 'sdate', hn: 'COALESCE(hn, nhso_hn)', patient: 'patient_name', pttype: 'pttype_name',
+  his: 'uc_money', claim: 'claim_amount', diff: 'diff', comp: 'compensated', rep: 'rep_no', error: 'error_code',
+};
+const OPD_FALLBACK = 'sdate, COALESCE(hn, nhso_hn), vn NULLS LAST';
 
 /**
  * สถานะผลการเปรียบเทียบ
@@ -162,7 +170,7 @@ export async function reconcileOpd(opts) {
              line_id, rep_no, tran_id, nhso_hn, pid, patient_name, service_date, fund,
              claim_amount, compensated, error_code, stm_docs, line_count, sdate, diff, status
       FROM ro r ${filterSql(1)}
-      ORDER BY sdate, COALESCE(hn, nhso_hn), vn NULLS LAST
+      ${orderBy(OPD_SORT, opts, OPD_FALLBACK)}
       LIMIT $3 OFFSET $4`, [...fp, pageSize, (page - 1) * pageSize]);
 
     const byStatus = Object.fromEntries(STATUSES.map((st) => [st, {
@@ -189,7 +197,7 @@ const EXPORT_LIMIT = 300_000;
 export async function exportOpd(opts) {
   const rows = await withReconTable(opts, async (c) => (await c.query(
     `SELECT * FROM ro r ${filterSql(1)}
-     ORDER BY sdate, COALESCE(hn, nhso_hn), vn NULLS LAST LIMIT ${EXPORT_LIMIT}`,
+     ${orderBy(OPD_SORT, opts, OPD_FALLBACK)} LIMIT ${EXPORT_LIMIT}`,
     [opts.status || null, opts.search?.trim() || null],
   )).rows).then(annotateErrors);
 

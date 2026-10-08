@@ -11,6 +11,7 @@ import AccountPage from './pages/AccountPage.jsx';
 import FundReconPage from './pages/FundReconPage.jsx';
 import FundSettingsPage from './pages/FundSettingsPage.jsx';
 import ReportsPage from './pages/ReportsPage.jsx';
+import RegistryPage from './pages/RegistryPage.jsx';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="recon/opd" element={<ReconOpdPage />} />
             <Route path="recon/funds" element={<FundReconPage />} />
             <Route path="reports" element={<ReportsPage />} />
+            <Route path="registry" element={<RegistryPage />} />
           </Route>
           <Route element={<ProtectedRoute roles={['admin']} />}>
             <Route path="mappings" element={<MappingsPage />} />

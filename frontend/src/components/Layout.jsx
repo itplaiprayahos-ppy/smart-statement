@@ -9,6 +9,7 @@ const MENU = [
   { to: '/import', icon: 'bi-file-earmark-arrow-up', label: 'นำเข้าไฟล์ สปสช.' },
   { to: '/recon/opd', icon: 'bi-ui-checks', label: 'กระทบยอด OPD' },
   { to: '/recon/funds', icon: 'bi-diagram-3', label: 'แยกกองทุน OPD' },
+  { to: '/registry', icon: 'bi-intersect', label: 'เทียบ 3 แหล่ง' },
   { to: '/reports', icon: 'bi-file-earmark-arrow-down', label: 'ส่งออกรายงาน' },
   { group: 'ผู้ดูแลระบบ', admin: true },
   { to: '/mappings', icon: 'bi-table', label: 'รูปแบบไฟล์ Excel', admin: true },

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../api/client.js';
+import SortTh from '../components/SortTh.jsx';
+import { useSort } from '../hooks/useSort.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
   confirmAction, notifySuccess, showError, showInfo, showSuccess, withLoading,
@@ -39,9 +41,16 @@ export default function ImportPage() {
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const preview = items.find((x) => x.id === selected)?.preview || null;
+  const fileSort = useSort(items, undefined, {
+    name: (x) => x.file.name, rep: (x) => x.preview?.stmDoc, rows: (x) => x.preview?.totalRows,
+    valid: (x) => x.preview?.validRows, errors: (x) => x.preview?.errorCount, status: (x) => x.status,
+  });
   const setItem = (id, patch) => setItems((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const [history, setHistory] = useState([]);
   const [legacy, setLegacy] = useState(null);
+  const histSort = useSort(history, undefined, {
+    period: (b) => b.date_min, inserted: (b) => b.inserted_rows, updated: (b) => b.updated_rows, errors: (b) => b.error_rows,
+  });
   const inputRef = useRef(null);
 
   const loadHistory = useCallback(() => {
@@ -245,12 +254,12 @@ export default function ImportPage() {
             <table className="table table-sm table-hover data-table clickable mb-0">
               <thead>
                 <tr>
-                  <th>ไฟล์</th><th>เลขที่ REP</th><th className="num">แถว</th><th className="num">นำเข้าได้</th>
-                  <th className="num">มีปัญหา</th><th>สถานะ</th><th />
+                  <SortTh k="name" sort={fileSort.sort} onSort={fileSort.toggle}>ไฟล์</SortTh><SortTh k="rep" sort={fileSort.sort} onSort={fileSort.toggle}>เลขที่ REP</SortTh><SortTh k="rows" sort={fileSort.sort} onSort={fileSort.toggle} className="num">แถว</SortTh><SortTh k="valid" sort={fileSort.sort} onSort={fileSort.toggle} className="num">นำเข้าได้</SortTh>
+                  <SortTh k="errors" sort={fileSort.sort} onSort={fileSort.toggle} className="num">มีปัญหา</SortTh><SortTh k="status" sort={fileSort.sort} onSort={fileSort.toggle}>สถานะ</SortTh><th />
                 </tr>
               </thead>
               <tbody>
-                {items.map((x) => {
+                {fileSort.sorted.map((x) => {
                   const p = x.preview;
                   const fundMissing = p ? Object.values(p.fundColumns || {}).filter((f) => f.missing.length).length : 0;
                   return (
@@ -431,13 +440,13 @@ export default function ImportPage() {
             <table className="table table-hover data-table">
               <thead>
                 <tr>
-                  <th>เวลา</th><th>ไฟล์</th><th>เลขที่ REP</th><th>ช่วงวันที่ในไฟล์</th>
-                  <th className="num">เพิ่มใหม่</th><th className="num">อัปเดต</th><th className="num">ข้าม</th>
-                  <th>ผู้นำเข้า</th><th />
+                  <SortTh k="created_at" sort={histSort.sort} onSort={histSort.toggle}>เวลา</SortTh><SortTh k="file_name" sort={histSort.sort} onSort={histSort.toggle}>ไฟล์</SortTh><SortTh k="stm_doc" sort={histSort.sort} onSort={histSort.toggle}>เลขที่ REP</SortTh><SortTh k="period" sort={histSort.sort} onSort={histSort.toggle}>ช่วงวันที่ในไฟล์</SortTh>
+                  <SortTh k="inserted" sort={histSort.sort} onSort={histSort.toggle} className="num">เพิ่มใหม่</SortTh><SortTh k="updated" sort={histSort.sort} onSort={histSort.toggle} className="num">อัปเดต</SortTh><SortTh k="errors" sort={histSort.sort} onSort={histSort.toggle} className="num">ข้าม</SortTh>
+                  <SortTh k="imported_by" sort={histSort.sort} onSort={histSort.toggle}>ผู้นำเข้า</SortTh><th />
                 </tr>
               </thead>
               <tbody>
-                {history.map((b) => (
+                {histSort.sorted.map((b) => (
                   <tr key={b.id}>
                     <td className="text-nowrap">{thaiDateTime(b.created_at)}</td>
                     <td>

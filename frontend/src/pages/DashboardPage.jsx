@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client.js';
 import KpiMonthlyChart from '../components/KpiMonthlyChart.jsx';
+import SortTh from '../components/SortTh.jsx';
+import { useSort } from '../hooks/useSort.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { showError } from '../utils/alert.js';
 import {
@@ -86,6 +88,17 @@ export default function DashboardPage() {
     return rate(last.sent, last.eligible) - rate(prev.sent, prev.eligible);
   };
 
+  const fundSort = useSort(data?.funds, undefined, {
+    code: (f) => f.sort_order,
+    patients: (f) => f.kpi?.patients, eligible: (f) => f.kpi?.eligible,
+    send: (f) => (f.track_only || !f.kpi ? null : rate(f.kpi.sent, f.kpi.eligible)),
+    success: (f) => (f.track_only || !f.kpi ? null : rate(f.kpi.paid, f.kpi.sent)),
+    complete: (f) => (f.track_only || !f.kpi ? null : rate(f.kpi.complete, f.kpi.eligible)),
+    notSent: (f) => (f.kpi ? Number(f.kpi.not_sent_amount) : null),
+    stm: (f) => (f.kpi ? Number(f.kpi.stm_amount) : null),
+    pending: (f) => f.kpi?.pending,
+  });
+  const roundSort = useSort(data?.rounds, undefined, { stm_period: (r) => r.stm_period, date_min: (r) => r.date_min });
   const o = data?.overall;
   const d = data?.defaults || { send: 95, success: 90, complete: 95 };
   const sendRate = o ? rate(o.sent, o.eligible) : null;
@@ -139,20 +152,20 @@ export default function DashboardPage() {
           <table className={`table data-table kpi-table ${isExec ? '' : 'clickable'}`}>
             <thead>
               <tr>
-                <th>กองทุน</th>
-                <th>ผู้รับผิดชอบ</th>
-                <th className="num">คนไข้</th>
-                <th className="num">visit ที่เข้าเกณฑ์</th>
-                <th className="num">อัตราการส่งเบิก</th>
-                <th className="num">อัตราเคลมสำเร็จ</th>
-                <th className="num">ความครบถ้วน</th>
-                <th className="num">ยอดยังไม่ส่งเบิก</th>
-                <th className="num">ยอดเบิกได้</th>
-                <th className="num">รอผล</th>
+                <SortTh k="code" sort={fundSort.sort} onSort={fundSort.toggle}>กองทุน</SortTh>
+                <SortTh k="responsible" sort={fundSort.sort} onSort={fundSort.toggle}>ผู้รับผิดชอบ</SortTh>
+                <SortTh k="patients" sort={fundSort.sort} onSort={fundSort.toggle} className="num">คนไข้</SortTh>
+                <SortTh k="eligible" sort={fundSort.sort} onSort={fundSort.toggle} className="num">visit ที่เข้าเกณฑ์</SortTh>
+                <SortTh k="send" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราการส่งเบิก</SortTh>
+                <SortTh k="success" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราเคลมสำเร็จ</SortTh>
+                <SortTh k="complete" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ความครบถ้วน</SortTh>
+                <SortTh k="notSent" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ยอดยังไม่ส่งเบิก</SortTh>
+                <SortTh k="stm" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ยอดเบิกได้</SortTh>
+                <SortTh k="pending" sort={fundSort.sort} onSort={fundSort.toggle} className="num">รอผล</SortTh>
               </tr>
             </thead>
             <tbody>
-              {data?.funds.map((f) => {
+              {fundSort.sorted.map((f) => {
                 const k = f.kpi;
                 return (
                   <tr key={f.code} onClick={isExec ? undefined : () => navigate('/recon/funds')}
@@ -215,9 +228,16 @@ export default function DashboardPage() {
             {data?.rounds.length ? (
               <div className="table-wrap">
                 <table className="table table-sm data-table mb-0">
-                  <thead><tr><th>เลขที่ REP</th><th>เดือนของรอบ</th><th className="num">รายการ</th><th>วันที่รับบริการในรอบ</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <SortTh k="stm_doc" sort={roundSort.sort} onSort={roundSort.toggle}>เลขที่ REP</SortTh>
+                      <SortTh k="stm_period" sort={roundSort.sort} onSort={roundSort.toggle}>เดือนของรอบ</SortTh>
+                      <SortTh k="lines" sort={roundSort.sort} onSort={roundSort.toggle} className="num">รายการ</SortTh>
+                      <SortTh k="date_min" sort={roundSort.sort} onSort={roundSort.toggle}>วันที่รับบริการในรอบ</SortTh>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {data.rounds.map((r) => (
+                    {roundSort.sorted.map((r) => (
                       <tr key={`${r.stm_doc}-${r.stm_period}`}>
                         <td>{r.stm_doc || <span className="muted">ไม่ระบุ</span>}</td>
                         <td>{r.stm_period ? thaiMonth(r.stm_period.slice(0, 7)) : '–'}</td>

@@ -18,6 +18,7 @@ import reconRoutes from './routes/recon.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import fundRoutes from './routes/funds.routes.js';
 import reportRoutes from './routes/reports.routes.js';
+import registryRoutes from './routes/registry.routes.js';
 
 const app = express();
 
@@ -48,6 +49,7 @@ app.use('/api/recon', reconRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/funds', fundRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/registry', registryRoutes);
 app.use('/api', notFound);
 
 // production: ให้ Express เสิร์ฟหน้าเว็บที่ build แล้ว (frontend/dist)

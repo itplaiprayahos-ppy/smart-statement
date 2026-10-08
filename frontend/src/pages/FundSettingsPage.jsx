@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api/client.js';
+import SortTh from '../components/SortTh.jsx';
+import { useSort } from '../hooks/useSort.js';
 import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
 import { money } from '../utils/format.js';
 
@@ -44,6 +46,7 @@ function PttypePicker({ list, error, value, onChange, excluded, note }) {
   const q = filter.trim().toLowerCase();
   const rows = list.filter((p) => (!groupFilter.length || groupFilter.includes(p.hipdata_code))
     && (!q || p.pttype.toLowerCase().includes(q) || (p.name || '').toLowerCase().includes(q)));
+  const ptSort = useSort(rows, undefined, { picked: (p) => (selected.has(p.pttype) ? 0 : 1), name: (p) => p.name, group: (p) => p.hipdata_code });
   const shownUsable = rows.filter(usable).map((p) => p.pttype);
   const toggle = (code) => onChange(selected.has(code) ? value.filter((c) => c !== code) : [...value, code]);
   const toggleGroup = (g) => setGroupFilter((f) => (f.includes(g) ? f.filter((x) => x !== g) : [...f, g]));
@@ -110,9 +113,16 @@ function PttypePicker({ list, error, value, onChange, excluded, note }) {
       </div>
       <div className="scroll-box">
         <table className="table table-sm table-hover data-table">
-          <thead><tr><th /><th>รหัส</th><th>ชื่อสิทธิ</th><th>กลุ่ม</th></tr></thead>
+          <thead>
+            <tr>
+              <SortTh k="picked" sort={ptSort.sort} onSort={ptSort.toggle} title="เรียงที่เลือกไว้ขึ้นก่อน">{' '}</SortTh>
+              <SortTh k="pttype" sort={ptSort.sort} onSort={ptSort.toggle}>รหัส</SortTh>
+              <SortTh k="name" sort={ptSort.sort} onSort={ptSort.toggle}>ชื่อสิทธิ</SortTh>
+              <SortTh k="group" sort={ptSort.sort} onSort={ptSort.toggle}>กลุ่ม</SortTh>
+            </tr>
+          </thead>
           <tbody>
-            {rows.map((p) => (
+            {ptSort.sorted.map((p) => (
               <tr key={p.pttype} onClick={usable(p) ? () => toggle(p.pttype) : undefined}
                 style={usable(p) ? { cursor: 'pointer' } : undefined} className={usable(p) ? '' : 'muted'}>
                 <td style={{ width: 36 }}>
@@ -140,6 +150,8 @@ export default function FundSettingsPage() {
   const [source, setSource] = useState('nondrug');
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
+  const itemSort = useSort(form?.items, undefined, { item_name: (it) => it.item_name, required: (it) => (it.required ? 0 : 1) });
+  const resultSort = useSort(results?.items, undefined, { price: (it) => (it.price == null ? null : Number(it.price)) });
   const [searching, setSearching] = useState(false);
   const [pttypeList, setPttypeList] = useState([]);
   const [pttypeNote, setPttypeNote] = useState(null);
@@ -443,9 +455,17 @@ export default function FundSettingsPage() {
                     <div className="empty">ยังไม่มีรายการ ค้นหาจาก HOSxP ด้านล่างแล้วกด “เพิ่ม”</div>
                   ) : (
                     <table className="table table-sm data-table">
-                      <thead><tr><th>icode</th><th>ชื่อรายการ</th><th>ประเภท</th><th className="text-center">จำเป็น</th><th /></tr></thead>
+                      <thead>
+                        <tr>
+                          <SortTh k="icode" sort={itemSort.sort} onSort={itemSort.toggle}>icode</SortTh>
+                          <SortTh k="item_name" sort={itemSort.sort} onSort={itemSort.toggle}>ชื่อรายการ</SortTh>
+                          <SortTh k="source" sort={itemSort.sort} onSort={itemSort.toggle}>ประเภท</SortTh>
+                          <SortTh k="required" sort={itemSort.sort} onSort={itemSort.toggle} className="text-center">จำเป็น</SortTh>
+                          <th />
+                        </tr>
+                      </thead>
                       <tbody>
-                        {form.items.map((it) => (
+                        {itemSort.sorted.map((it) => (
                           <tr key={it.icode}>
                             <td>{it.icode}</td>
                             <td className="wrap">{it.item_name}</td>
@@ -503,9 +523,16 @@ export default function FundSettingsPage() {
                     <div className="empty">{results ? 'ไม่พบรายการ' : 'พิมพ์ icode หรือชื่อรายการ แล้วกดค้นหา'}</div>
                   ) : (
                     <table className="table table-sm table-hover data-table">
-                      <thead><tr><th>icode</th><th>ชื่อรายการ</th><th className="num">ราคา</th><th /></tr></thead>
+                      <thead>
+                        <tr>
+                          <SortTh k="icode" sort={resultSort.sort} onSort={resultSort.toggle}>icode</SortTh>
+                          <SortTh k="name" sort={resultSort.sort} onSort={resultSort.toggle}>ชื่อรายการ</SortTh>
+                          <SortTh k="price" sort={resultSort.sort} onSort={resultSort.toggle} className="num">ราคา</SortTh>
+                          <th />
+                        </tr>
+                      </thead>
                       <tbody>
-                        {results.items.map((it) => (
+                        {resultSort.sorted.map((it) => (
                           <tr key={it.icode}>
                             <td>{it.icode}</td>
                             <td className="wrap">{it.name}</td>

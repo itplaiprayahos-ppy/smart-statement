@@ -1,6 +1,14 @@
 import * as XLSX from 'xlsx';
 import { db } from '../config/db.js';
 import { env } from '../config/env.js';
+import { orderBy } from '../utils/sort.js';
+
+/** คอลัมน์ที่กดเรียงได้ในตารางรายละเอียดแยกกองทุน */
+const DETAIL_SORT = {
+  status: 'fund_status', fund: 'fund_code', sdate: 'sdate', hn: 'hn', patient: 'patient_name', pttype: 'pttype_name',
+  items: 'items', missing: 'COALESCE(missing_required, missing_common)', his: 'his_fund_amount', stm: 'stm_fund_amount',
+  diff: '(stm_fund_amount - his_fund_amount)', rep: 'rep_no', error: 'error_code',
+};
 import { baseCte, baseParams } from './reconService.js';
 
 /**
@@ -295,7 +303,7 @@ export async function reconcileFunds(opts) {
       GROUP BY 1 ORDER BY 1`, [opts.fundCode || null]);
     const count = await c.query(`SELECT COUNT(*)::int AS total FROM fy ${DETAIL_WHERE}`, dp);
     const rows = await c.query(`SELECT * FROM fy ${DETAIL_WHERE}
-      ORDER BY sdate, hn, fund_code LIMIT $5 OFFSET $6`, [...dp, pageSize, (page - 1) * pageSize]);
+      ${orderBy(DETAIL_SORT, opts, 'sdate, hn, fund_code')} LIMIT $5 OFFSET $6`, [...dp, pageSize, (page - 1) * pageSize]);
     const coverage = await pullCoverage(c, opts);
 
     const totals = people.rows.find((r) => r.fund_code === null) || { patients: 0, visits: 0 };
@@ -374,7 +382,7 @@ const STATUS_TH = {
 export async function exportFunds(opts) {
   const rows = await withFundTable({ ...opts, fundCode: null }, async (c) => (await c.query(
     `SELECT fy.*, f.name AS fund_name FROM fy JOIN funds f ON f.code = fy.fund_code
-     ${DETAIL_WHERE.replace(/\bfund_code\b/, 'fy.fund_code')} ORDER BY fy.fund_code, fy.sdate, fy.hn LIMIT 300000`,
+     ${DETAIL_WHERE.replace(/\bfund_code\b/, 'fy.fund_code')} ${orderBy(DETAIL_SORT, opts, 'fy.fund_code, fy.sdate, fy.hn')} LIMIT 300000`,
     detailParams(opts),
   )).rows);
 
