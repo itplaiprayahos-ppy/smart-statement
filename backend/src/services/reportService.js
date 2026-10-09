@@ -12,7 +12,7 @@ export const REPORT_TYPES = {
     where: "fund_status NOT IN ('EXTRA_PAID', 'RECEIVED')",
   },
   not_sent: {
-    title: 'ยังไม่ส่งเบิก / ไม่พบใน REP',
+    title: 'ยังไม่พบใน REP',
     description: 'visit ที่เข้าเกณฑ์แต่ยังไม่มีใน REP ที่นำเข้า ใช้ตรวจว่าส่งเบิกแล้วหรือยัง',
     where: "fund_status = 'NOT_SENT'",
   },
@@ -53,7 +53,7 @@ const STATUS_TH = {
   PAID: 'ได้รับเงิน',
   NOT_PAID: 'ไม่ได้รับเงินกองทุนนี้',
   DENIED: 'ถูกปฏิเสธ/ติด C',
-  NOT_SENT: 'ไม่พบใน REP',
+  NOT_SENT: 'ยังไม่พบใน REP',
   EXTRA_PAID: 'ได้รับเงินแต่ไม่เข้าเกณฑ์',
   RECEIVED: 'ได้รับเงิน (ติดตามยอดรับ)',
 };
@@ -101,8 +101,8 @@ function toSheetRows(rows) {
     'icode ที่เข้าเกณฑ์': r.item_codes,
     'ขาดรายการจำเป็น': r.missing_required,
     'ขาดเมื่อเทียบเคสที่ได้รับเงิน': r.missing_common,
-    'ยอดตั้งเบิก (HOSxP)': r.his_fund_amount,
-    'ยอดเบิกได้ (กองทุนนี้)': r.stm_fund_amount,
+    'ตั้งเบิก (HOSxP)': r.his_fund_amount,
+    'ได้รับ (REP) กองทุนนี้': r.stm_fund_amount,
     'REP No.': r.rep_no,
     'TRAN_ID': r.tran_id,
     'เลขที่ REP': r.stm_docs,
@@ -150,7 +150,7 @@ export async function buildReport(opts, user) {
       ['ส่งออกโดย', user.full_name || user.username],
       ['เวลาที่ส่งออก', new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })],
       [],
-      ['กองทุน', 'ชื่อกองทุน', 'จำนวนรายการ', 'จำนวนคนไข้', 'ยอดตั้งเบิก (HOSxP)', 'ยอดเบิกได้'],
+      ['กองทุน', 'ชื่อกองทุน', 'จำนวนรายการ', 'จำนวนคนไข้', 'ตั้งเบิก (HOSxP)', 'ได้รับ (REP)'],
     ];
     funds.forEach((f) => {
       const fr = rows.filter((r) => r.fund_code === f.code);

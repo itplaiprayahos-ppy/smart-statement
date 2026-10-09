@@ -14,7 +14,7 @@ export default function KpiMonthlyChart({ months, target }) {
     labels: months.map((m) => `${thaiMonth(m.month)}${m.closed ? '' : ' (รอผล)'}`),
     datasets: [
       {
-        type: 'bar', label: 'ยอดเบิกได้ (บาท)', yAxisID: 'y', order: 3, // วาดก่อน (อยู่ด้านหลังเส้น)
+        type: 'bar', label: 'ได้รับจาก REP (บาท)', yAxisID: 'y', order: 3, // วาดก่อน (อยู่ด้านหลังเส้น)
         data: months.map((m) => Number(m.stm_amount)),
         backgroundColor: months.map((m) => (m.closed ? '#0f5c5a' : '#c9d9d7')),
       },

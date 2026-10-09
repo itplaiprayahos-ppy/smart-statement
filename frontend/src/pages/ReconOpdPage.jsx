@@ -5,6 +5,7 @@ import StatusBadge from '../components/StatusBadge.jsx';
 import Diff from '../components/Diff.jsx';
 import StatusChart from '../components/StatusChart.jsx';
 import SortTh from '../components/SortTh.jsx';
+import ThaiDateInput from '../components/ThaiDateInput.jsx';
 import { useSortState } from '../hooks/useSort.js';
 import { confirmAction, notifySuccess, showError, withLoading } from '../utils/alert.js';
 import {
@@ -143,11 +144,11 @@ export default function ReconOpdPage() {
           </div>
           <div className="col-sm-6 col-lg-2">
             <label className="form-label" htmlFor="df">ตั้งแต่วันที่</label>
-            <input id="df" type="date" className="form-control" value={filters.dateFrom} onChange={setFilter('dateFrom')} />
+            <ThaiDateInput id="df" value={filters.dateFrom} onChange={(v) => setFilter('dateFrom')({ target: { value: v, type: 'text' } })} />
           </div>
           <div className="col-sm-6 col-lg-2">
             <label className="form-label" htmlFor="dt">ถึงวันที่</label>
-            <input id="dt" type="date" className="form-control" value={filters.dateTo} onChange={setFilter('dateTo')} />
+            <ThaiDateInput id="dt" value={filters.dateTo} onChange={(v) => setFilter('dateTo')({ target: { value: v, type: 'text' } })} />
           </div>
           <div className="col-sm-6 col-lg-2">
             <label className="form-label" htmlFor="fund">สิทธิ (ตาม HOSxP)</label>
@@ -156,10 +157,10 @@ export default function ReconOpdPage() {
             </select>
           </div>
           <div className="col-sm-6 col-lg-2">
-            <label className="form-label" htmlFor="cmp">เทียบยอด HOSxP กับ</label>
+            <label className="form-label" htmlFor="cmp">เทียบเรียกเก็บ (HOSxP) กับ</label>
             <select id="cmp" className="form-select" value={filters.compare} onChange={setFilter('compare')}>
-              <option value="claim">ยอดเรียกเก็บใน REP</option>
-              <option value="compensated">ยอดชดเชยที่ได้รับ</option>
+              <option value="claim">เรียกเก็บ (REP)</option>
+              <option value="compensated">ได้รับ (REP)</option>
             </select>
           </div>
           <div className="col-lg-2">
@@ -211,7 +212,7 @@ export default function ReconOpdPage() {
 
       <div className="panel">
         <div className="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
-          <form className="d-flex gap-2" onSubmit={(e) => { e.preventDefault(); setSearch(searchInput.trim()); setPage(1); }}>
+          <form className="d-flex flex-wrap gap-2" style={{ minWidth: 0 }} onSubmit={(e) => { e.preventDefault(); setSearch(searchInput.trim()); setPage(1); }}>
             <input className="form-control" style={{ minWidth: 320 }} placeholder="ค้นหา HN, VN, เลขบัตร, TRAN_ID, ชื่อ"
               value={searchInput} onChange={(e) => setSearchInput(e.target.value)} aria-label="ค้นหา" />
             <button type="submit" className="btn btn-outline-primary">ค้นหา</button>
@@ -227,7 +228,7 @@ export default function ReconOpdPage() {
         </div>
 
         <div className="table-wrap">
-          <table className="table table-hover data-table">
+          <table className="table table-hover data-table sticky-first">
             <thead>
               <tr>
                 <SortTh k="status" sort={sort} onSort={onSort}>สถานะ</SortTh>
@@ -235,10 +236,10 @@ export default function ReconOpdPage() {
                 <SortTh k="hn" sort={sort} onSort={onSort}>HN / VN</SortTh>
                 <SortTh k="patient" sort={sort} onSort={onSort}>ผู้ป่วย</SortTh>
                 <SortTh k="pttype" sort={sort} onSort={onSort}>สิทธิ</SortTh>
-                <SortTh k="his" sort={sort} onSort={onSort} className="num">ยอด HOSxP</SortTh>
-                <SortTh k="claim" sort={sort} onSort={onSort} className="num">เรียกเก็บ (สปสช.)</SortTh>
+                <SortTh k="his" sort={sort} onSort={onSort} className="num">เรียกเก็บ (HOSxP)</SortTh>
+                <SortTh k="claim" sort={sort} onSort={onSort} className="num">เรียกเก็บ (REP)</SortTh>
                 <SortTh k="diff" sort={sort} onSort={onSort} className="num">ผลต่าง</SortTh>
-                <SortTh k="comp" sort={sort} onSort={onSort} className="num">ชดเชย</SortTh>
+                <SortTh k="comp" sort={sort} onSort={onSort} className="num">ได้รับ (REP)</SortTh>
                 <SortTh k="rep" sort={sort} onSort={onSort}>REP / TRAN_ID</SortTh>
                 <SortTh k="error" sort={sort} onSort={onSort}>รหัสข้อผิดพลาด</SortTh>
                 <th>รายละเอียดข้อผิดพลาด</th>

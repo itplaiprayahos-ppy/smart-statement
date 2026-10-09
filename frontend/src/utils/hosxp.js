@@ -1,6 +1,7 @@
 import api from '../api/client.js';
 import { confirmAction, notifySuccess, showError, withLoading } from './alert.js';
 import { daysInRange, int, thaiDate } from './format.js';
+import { notifyDataChanged } from './dataEvents.js';
 
 /** ยืนยันแล้วดึงข้อมูล OPD (visit + รายการค่าบริการตามกองทุน) จาก HOSxP คืน true เมื่อสำเร็จ */
 export async function pullHosxpOpd({ dateFrom, dateTo }) {
@@ -15,6 +16,7 @@ export async function pullHosxpOpd({ dateFrom, dateTo }) {
   try {
     const res = await withLoading('กำลังดึงข้อมูลจาก HOSxP…', () => api.post('/his/opd/pull', { dateFrom, dateTo }));
     notifySuccess(`ดึงข้อมูลแล้ว ${int(res.data.rowCount)} visit, รายการค่าบริการตามกองทุน ${int(res.data.itemCount)} รายการ`);
+    notifyDataChanged();
     return true;
   } catch (err) {
     showError(err, 'ดึงข้อมูล HOSxP ไม่สำเร็จ');

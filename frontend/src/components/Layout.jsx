@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import DataStatusBar from './DataStatusBar.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { confirmAction } from '../utils/alert.js';
 
@@ -74,6 +75,7 @@ export default function Layout() {
       </aside>
 
       <main className="main">
+        <DataStatusBar />
         <Outlet />
       </main>
     </div>

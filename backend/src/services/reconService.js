@@ -16,7 +16,7 @@ const OPD_FALLBACK = 'sdate, COALESCE(hn, nhso_hn), vn NULLS LAST';
  *  AMOUNT_DIFF  พบทั้งสองฝั่ง แต่ยอดต่างกัน
  *  DENIED       สปสช. ปฏิเสธ / ติด C (มีรหัสข้อผิดพลาด)
  *  MULTIPLE     มาหลายครั้งในวันเดียว ระบบจับคู่ตามลำดับยอดเงินให้ แต่ควรตรวจด้วยคน
- *  NOT_IN_STM   มีใน HOSxP แต่ไม่พบใน REP
+ *  NOT_IN_STM   มีใน HOSxP แต่ยังไม่พบใน REP
  *  NOT_IN_HIS   มีใน REP แต่ไม่พบใน HOSxP
  */
 export const STATUSES = ['MATCHED', 'AMOUNT_DIFF', 'DENIED', 'MULTIPLE', 'NOT_IN_STM', 'NOT_IN_HIS'];
@@ -186,7 +186,7 @@ const STATUS_TH = {
   AMOUNT_DIFF: 'ยอดต่าง',
   DENIED: 'ถูกปฏิเสธ/ติด C',
   MULTIPLE: 'หลายครั้งในวันเดียว (ควรตรวจสอบ)',
-  NOT_IN_STM: 'ไม่พบใน REP',
+  NOT_IN_STM: 'ยังไม่พบใน REP',
   NOT_IN_HIS: 'ไม่พบใน HOSxP',
 };
 
@@ -212,13 +212,13 @@ export async function exportOpd(opts) {
     'สิทธิ (HOSxP)': r.pttype_name,
     'กองทุน': r.hipdata_code,
     'PDX': r.pdx,
-    'ยอดเรียกเก็บ (HOSxP)': r.uc_money,
+    'เรียกเก็บ (HOSxP)': r.uc_money,
     'REP No.': r.rep_no,
     'TRAN_ID': r.tran_id,
     'เลขที่ REP': r.stm_docs,
-    'ยอดเรียกเก็บ (สปสช.)': r.claim_amount,
+    'เรียกเก็บ (REP)': r.claim_amount,
     'ผลต่าง': r.diff,
-    'ยอดชดเชย': r.compensated,
+    'ได้รับ (REP)': r.compensated,
     'รหัสข้อผิดพลาด': r.error_code,
     'รายละเอียดข้อผิดพลาด': r.error_detail,
     'แนวทางแก้ไข': r.error_guidance,

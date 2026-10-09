@@ -15,9 +15,9 @@ export default function StatusChart({ summary }) {
   const data = {
     labels,
     datasets: [
-      { label: 'ยอด HOSxP', data: pick('his_amount'), backgroundColor: '#0f5c5a' },
-      { label: 'เรียกเก็บ (สปสช.)', data: pick('claim_amount'), backgroundColor: '#8fb5b1' },
-      { label: 'ชดเชย', data: pick('compensated'), backgroundColor: '#e7b559' },
+      { label: 'เรียกเก็บ (HOSxP)', data: pick('his_amount'), backgroundColor: '#0f5c5a' },
+      { label: 'เรียกเก็บ (REP)', data: pick('claim_amount'), backgroundColor: '#8fb5b1' },
+      { label: 'ได้รับ (REP)', data: pick('compensated'), backgroundColor: '#e7b559' },
     ],
   };
   const options = {

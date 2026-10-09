@@ -26,7 +26,7 @@ function KpiCard({ label, value, sub, level, target }) {
   );
 }
 
-function RateCell({ value, target, trend }) {
+function RateCell({ value, target, trend, headTarget }) {
   const level = kpiLevel(value, Number(target));
   return (
     <td className="num">
@@ -36,7 +36,8 @@ function RateCell({ value, target, trend }) {
         <i className={`bi ${trend > 0 ? 'bi-arrow-up-short text-success' : 'bi-arrow-down-short text-danger'}`}
           title={`เทียบเดือนก่อน ${trend > 0 ? '+' : ''}${trend.toFixed(1)} จุด`} />
       )}
-      <div className="small-id">เป้า {Number(target)}%</div>
+      {/* แสดงเป้าในช่องเฉพาะกองทุนที่เป้าต่างจากหัวคอลัมน์ */}
+      {Number(target) !== Number(headTarget) && <div className="small-id">เป้า {Number(target)}%</div>}
     </td>
   );
 }
@@ -98,6 +99,16 @@ export default function DashboardPage() {
     stm: (f) => (f.kpi ? Number(f.kpi.stm_amount) : null),
     pending: (f) => f.kpi?.pending,
   });
+  const [showEmpty, setShowEmpty] = useState(false);
+  const isEmptyFund = (f) => !f.kpi || (!f.kpi.eligible && !Number(f.kpi.stm_amount) && !f.kpi.pending && !f.kpi.received);
+  const emptyCount = data ? data.funds.filter(isEmptyFund).length : 0;
+  // เป้าที่ใช้มากที่สุดของแต่ละตัวชี้วัด แสดงที่หัวคอลัมน์
+  const commonTarget = (key) => {
+    const list = (data?.funds || []).filter((f) => !f.track_only).map((f) => Number(f[key]));
+    const count = {}; list.forEach((v) => { count[v] = (count[v] || 0) + 1; });
+    return Number(Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0);
+  };
+  const tSend = commonTarget('target_send'); const tSuccess = commonTarget('target_success'); const tComplete = commonTarget('target_complete');
   const roundSort = useSort(data?.rounds, undefined, { stm_period: (r) => r.stm_period, date_min: (r) => r.date_min });
   const o = data?.overall;
   const d = data?.defaults || { send: 95, success: 90, complete: 95 };
@@ -128,8 +139,8 @@ export default function DashboardPage() {
 
       {/* ---------- ตัวเลขหลัก ---------- */}
       <div className="kpi-grid">
-        <KpiCard label="ยอดเบิกได้" value={o ? money(o.stm_amount) : '–'} sub="บาท จาก REP ทุกรอบ" />
-        <KpiCard label="ยอดที่ยังไม่ส่งเบิก" value={o ? money(o.not_sent_amount) : '–'}
+        <KpiCard label="ยอดที่ได้รับ (REP)" value={o ? money(o.stm_amount) : '–'} sub="บาท จาก REP ทุกรอบ" />
+        <KpiCard label="ยอดที่ยังไม่พบใน REP" value={o ? money(o.not_sent_amount) : '–'}
           sub={o?.pending_amount > 0 ? `บาท (รอผลอีก ${money(o.pending_amount)})` : 'บาท ในเดือนที่ปิดยอดแล้ว'} />
         <KpiCard label="อัตราการส่งเบิก" value={fmtRate(sendRate)} target={d.send} level={kpiLevel(sendRate, d.send)}
           sub={o ? ` ${int(o.sent)} / ${int(o.eligible)} visit` : ''} />
@@ -149,23 +160,23 @@ export default function DashboardPage() {
           </span>
         </div>
         <div className="table-wrap">
-          <table className={`table data-table kpi-table ${isExec ? '' : 'clickable'}`}>
+          <table className={`table data-table kpi-table sticky-first ${isExec ? '' : 'clickable'}`}>
             <thead>
               <tr>
                 <SortTh k="code" sort={fundSort.sort} onSort={fundSort.toggle}>กองทุน</SortTh>
                 <SortTh k="responsible" sort={fundSort.sort} onSort={fundSort.toggle}>ผู้รับผิดชอบ</SortTh>
                 <SortTh k="patients" sort={fundSort.sort} onSort={fundSort.toggle} className="num">คนไข้</SortTh>
                 <SortTh k="eligible" sort={fundSort.sort} onSort={fundSort.toggle} className="num">visit ที่เข้าเกณฑ์</SortTh>
-                <SortTh k="send" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราการส่งเบิก</SortTh>
-                <SortTh k="success" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราเคลมสำเร็จ</SortTh>
-                <SortTh k="complete" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ความครบถ้วน</SortTh>
-                <SortTh k="notSent" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ยอดยังไม่ส่งเบิก</SortTh>
-                <SortTh k="stm" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ยอดเบิกได้</SortTh>
+                <SortTh k="send" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราการส่งเบิก<span className="th-sub">เป้า {tSend}%</span></SortTh>
+                <SortTh k="success" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราเคลมสำเร็จ<span className="th-sub">เป้า {tSuccess}%</span></SortTh>
+                <SortTh k="complete" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ความครบถ้วน<span className="th-sub">เป้า {tComplete}%</span></SortTh>
+                <SortTh k="notSent" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ยังไม่พบใน REP (บาท)</SortTh>
+                <SortTh k="stm" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ได้รับ (REP)</SortTh>
                 <SortTh k="pending" sort={fundSort.sort} onSort={fundSort.toggle} className="num">รอผล</SortTh>
               </tr>
             </thead>
             <tbody>
-              {fundSort.sorted.map((f) => {
+              {fundSort.sorted.filter((f) => showEmpty || !isEmptyFund(f)).map((f) => {
                 const k = f.kpi;
                 return (
                   <tr key={f.code} onClick={isExec ? undefined : () => navigate('/recon/funds')}
@@ -185,9 +196,9 @@ export default function DashboardPage() {
                       <>
                         <td className="num">{k ? int(k.patients) : '–'}</td>
                         <td className="num">{k ? int(k.eligible) : '–'}</td>
-                        <RateCell value={k ? rate(k.sent, k.eligible) : null} target={f.target_send} trend={trendOf(f.code)} />
-                        <RateCell value={k ? rate(k.paid, k.sent) : null} target={f.target_success} />
-                        <RateCell value={k ? rate(k.complete, k.eligible) : null} target={f.target_complete} />
+                        <RateCell value={k ? rate(k.sent, k.eligible) : null} target={f.target_send} headTarget={tSend} trend={trendOf(f.code)} />
+                        <RateCell value={k ? rate(k.paid, k.sent) : null} target={f.target_success} headTarget={tSuccess} />
+                        <RateCell value={k ? rate(k.complete, k.eligible) : null} target={f.target_complete} headTarget={tComplete} />
                         <td className="num">{k ? money(k.not_sent_amount) : '–'}</td>
                       </>
                     )}
@@ -199,6 +210,11 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
+        {emptyCount > 0 && (
+          <button type="button" className="btn btn-sm btn-link px-0" onClick={() => setShowEmpty((v) => !v)}>
+            {showEmpty ? 'ซ่อนกองทุนที่ไม่มีข้อมูล' : `แสดงกองทุนที่ไม่มีข้อมูลในช่วงนี้ (${emptyCount})`}
+          </button>
+        )}
         <p className="small muted mb-0 mt-2">
           อัตราการส่งเบิก = visit ที่พบใน REP ÷ visit ที่เข้าเกณฑ์, อัตราเคลมสำเร็จ = ได้รับเงิน ÷ ที่พบใน REP,
           ความครบถ้วน = visit ที่มีเลขบัตร 13 หลัก มี PDX และไม่ขาดรายการจำเป็น ÷ visit ที่เข้าเกณฑ์

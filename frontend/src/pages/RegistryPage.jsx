@@ -4,6 +4,8 @@ import Modal from '../components/Modal.jsx';
 import Pagination from '../components/Pagination.jsx';
 import PeriodFields from '../components/PeriodFields.jsx';
 import SortTh from '../components/SortTh.jsx';
+import { notifyDataChanged } from '../utils/dataEvents.js';
+import { pullHosxpOpd } from '../utils/hosxp.js';
 import { useSort, useSortState } from '../hooks/useSort.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { confirmAction, notifySuccess, showError, showSuccess } from '../utils/alert.js';
@@ -55,6 +57,7 @@ function UploadModal({ fund, onClose, onDone }) {
       const { data } = await api.post('/registry', fd);
       await showSuccess('นำเข้าทะเบียนแล้ว', `${int(data.inserted)} รายการ (แทนที่รายการเดิม ${int(data.replaced)} รายการ)`
         + (data.unknown ? `<br>มีรายการที่ยังไม่รู้จัก ${int(data.unknown)} แถว กรุณาจับคู่รายการ` : ''));
+      notifyDataChanged();
       onDone();
     } catch (err) { showError(err, 'นำเข้าไม่สำเร็จ'); } finally { setBusy(false); }
   };
@@ -227,7 +230,7 @@ export default function RegistryPage() {
   const exportUrl = `/api/registry/compare/export?${new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined))}`;
   const removeBatch = async (b) => {
     if (!(await confirmAction({ title: 'ลบการอัปโหลดนี้?', text: `${b.file_name}: รายการในทะเบียนจากไฟล์นี้จะถูกลบ`, confirmText: 'ลบ', danger: true }))) return;
-    try { await api.delete(`/registry/batches/${b.id}`); notifySuccess('ลบแล้ว'); load(); } catch (err) { showError(err); }
+    try { await api.delete(`/registry/batches/${b.id}`); notifySuccess('ลบแล้ว'); notifyDataChanged(); load(); } catch (err) { showError(err); }
   };
   const totalRows = data ? Object.values(data.summary).reduce((a, b) => a + b, 0) : 0;
 
@@ -285,9 +288,12 @@ export default function RegistryPage() {
         </div>
       )}
       {data?.stale && (
-        <div className="alert alert-warning d-flex align-items-center gap-2">
+        <div className="alert alert-warning d-flex flex-wrap align-items-center gap-2">
           <i className="bi bi-arrow-repeat" />
-          ทะเบียนถูกอัปโหลดหลังดึงข้อมูล HOSxP ครั้งล่าสุด ควรดึงข้อมูล HOSxP ช่วงนี้ใหม่ (หน้ากระทบยอด OPD) เพื่อให้เห็นรายการในทะเบียนครบ
+          <span className="me-auto">ทะเบียนถูกอัปโหลดหลังดึงข้อมูล HOSxP ครั้งล่าสุด ควรดึงข้อมูล HOSxP ช่วงนี้ใหม่ เพื่อให้เห็นรายการในทะเบียนครบ</span>
+          <button type="button" className="btn btn-sm btn-warning" onClick={async () => { if (await pullHosxpOpd(range)) load(); }}>
+            <i className="bi bi-database-down me-1" />ดึงข้อมูล HOSxP ช่วงนี้
+          </button>
         </div>
       )}
 
@@ -318,7 +324,7 @@ export default function RegistryPage() {
           </a>
         </div>
         <div className="table-wrap">
-          <table className="table data-table compare-table">
+          <table className="table data-table compare-table sticky-first">
             <thead>
               <tr>
                 <SortTh k="sdate" sort={sort} onSort={onSort}>วันที่</SortTh>

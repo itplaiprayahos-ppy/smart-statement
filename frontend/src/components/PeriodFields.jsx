@@ -1,4 +1,5 @@
 import { PERIODS, periodOf, toIso } from '../utils/format.js';
+import ThaiDateInput from './ThaiDateInput.jsx';
 
 /**
  * ช่องเลือกช่วงเวลา (เดือนที่แล้ว / ปีงบประมาณ) + วันที่เริ่มและสิ้นสุด
@@ -10,8 +11,7 @@ export default function PeriodFields({ value, onChange, idPrefix = 'p' }) {
     if (p) onChange(p.range());
   };
 
-  const setFrom = (e) => {
-    const v = e.target.value;
+  const setFrom = (v) => {
     const next = { ...value, dateFrom: v };
     // เลือกวันเริ่มเลยวันสิ้นสุด: เลื่อนวันสิ้นสุดเป็นวันสุดท้ายของเดือนนั้น
     if (v && next.dateTo && v > next.dateTo) {
@@ -32,12 +32,11 @@ export default function PeriodFields({ value, onChange, idPrefix = 'p' }) {
       </div>
       <div className="col-sm-6 col-lg-2">
         <label className="form-label" htmlFor={`${idPrefix}-df`}>ตั้งแต่วันที่</label>
-        <input id={`${idPrefix}-df`} type="date" className="form-control" value={value.dateFrom} onChange={setFrom} />
+        <ThaiDateInput id={`${idPrefix}-df`} value={value.dateFrom} onChange={setFrom} />
       </div>
       <div className="col-sm-6 col-lg-2">
         <label className="form-label" htmlFor={`${idPrefix}-dt`}>ถึงวันที่</label>
-        <input id={`${idPrefix}-dt`} type="date" className="form-control" value={value.dateTo}
-          onChange={(e) => onChange({ ...value, dateTo: e.target.value })} />
+        <ThaiDateInput id={`${idPrefix}-dt`} value={value.dateTo} onChange={(v) => onChange({ ...value, dateTo: v })} />
       </div>
     </>
   );

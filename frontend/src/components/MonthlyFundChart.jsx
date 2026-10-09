@@ -13,8 +13,8 @@ export default function MonthlyFundChart({ months }) {
   const data = {
     labels: months.map((m) => thaiMonth(m.month)),
     datasets: [
-      { type: 'bar', label: 'ยอดตั้งเบิก (HOSxP)', data: months.map((m) => m.his_amount), backgroundColor: '#8fb5b1', yAxisID: 'y' },
-      { type: 'bar', label: 'ยอดเบิกได้', data: months.map((m) => m.stm_amount), backgroundColor: '#0f5c5a', yAxisID: 'y' },
+      { type: 'bar', label: 'ตั้งเบิก (HOSxP)', data: months.map((m) => m.his_amount), backgroundColor: '#8fb5b1', yAxisID: 'y' },
+      { type: 'bar', label: 'ได้รับ (REP)', data: months.map((m) => m.stm_amount), backgroundColor: '#0f5c5a', yAxisID: 'y' },
       {
         type: 'line', label: 'คนไข้', data: months.map((m) => m.patients), borderColor: '#e7b559',
         backgroundColor: '#e7b559', yAxisID: 'y1', tension: 0.25,

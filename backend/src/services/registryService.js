@@ -148,7 +148,7 @@ export const COMPARE_STATUSES = {
   NOT_CHARGED:     { label: 'ยังไม่ลงค่าบริการใน HOSxP' },
   PRICE_DIFF:      { label: 'ราคาไม่ตรงกัน' },
   DENIED:          { label: 'ส่งเบิกแล้วติด C' },
-  NOT_CLAIMED:     { label: 'ยังไม่ส่งเบิก' },
+  NOT_CLAIMED:     { label: 'ยังไม่พบใน REP' },
   NOT_PAID:        { label: 'ไม่ได้รับเงินกองทุนนี้' },
   NOT_IN_REGISTRY: { label: 'ไม่อยู่ในทะเบียน' },
 };

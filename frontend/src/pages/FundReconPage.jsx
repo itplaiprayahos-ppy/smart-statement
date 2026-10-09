@@ -110,6 +110,9 @@ export default function FundReconPage() {
   const select = (code, status) => { setFundCode(code); setFundStatus(status); setPage(1); };
 
   const summary = useMemo(() => (data ? buildSummary(data) : null), [data]);
+  const [showEmpty, setShowEmpty] = useState(false);
+  const isEmptyFund = (f) => !f.visits && !f.stm && !f.extraCount && !f.receivedCount;
+  const emptyCount = summary ? summary.rows.filter(isEmptyFund).length : 0;
   const sumSort = useSort(summary?.rows, undefined, {
     stm: (f) => (f.track_only ? f.receivedAmount : f.stm),
     visits: (f) => (f.track_only ? f.receivedCount : f.visits),
@@ -216,7 +219,7 @@ export default function FundReconPage() {
           <span className="small muted">คลิกแถวเพื่อดูรายเดือนและรายละเอียด หรือคลิกตัวเลขเพื่อกรองตามสถานะ</span>
         </div>
         <div className="table-wrap">
-          <table className="table data-table fund-summary">
+          <table className="table data-table fund-summary sticky-first">
             <thead>
               <tr>
                 <SortTh k="code" sort={sumSort.sort} onSort={sumSort.toggle} rowSpan={2}>กองทุน</SortTh>
@@ -227,16 +230,16 @@ export default function FundReconPage() {
               <tr>
                 <SortTh k="patients" sort={sumSort.sort} onSort={sumSort.toggle} className="num">คนไข้</SortTh>
                 <SortTh k="visits" sort={sumSort.sort} onSort={sumSort.toggle} className="num">visit</SortTh>
-                <SortTh k="his" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ยอดตั้งเบิก</SortTh>
-                <SortTh k="stm" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ยอดเบิกได้</SortTh>
-                <SortTh k="pct" sort={sumSort.sort} onSort={sumSort.toggle} className="num">เบิกได้ %</SortTh>
+                <SortTh k="his" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ตั้งเบิก (HOSxP)</SortTh>
+                <SortTh k="stm" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ได้รับ (REP)</SortTh>
+                <SortTh k="pct" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ได้รับ %</SortTh>
                 {FUND_STATUS_ORDER.map((st) => <SortTh key={st} k={st} sort={sumSort.sort} onSort={sumSort.toggle} className="num">{FUND_STATUS_META[st].label}</SortTh>)}
                 <SortTh k="extraCount" sort={sumSort.sort} onSort={sumSort.toggle} className="num" title={EXTRA_PAID_META.hint}>{EXTRA_PAID_META.label}</SortTh>
                 <SortTh k="extraAmount" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ยอดเงิน</SortTh>
               </tr>
             </thead>
             <tbody>
-              {sumSort.sorted.map((f) => (
+              {sumSort.sorted.filter((f) => showEmpty || !isEmptyFund(f) || fundCode === f.code).map((f) => (
                 <tr key={f.code} className={fundCode === f.code ? 'active' : ''} onClick={() => select(fundCode === f.code ? '' : f.code, '')}>
                   <td>
                     <strong>{f.code}</strong> <span className="muted">{f.name}</span>
@@ -289,9 +292,14 @@ export default function FundReconPage() {
             )}
           </table>
         </div>
+        {emptyCount > 0 && (
+          <button type="button" className="btn btn-sm btn-link px-0" onClick={() => setShowEmpty((v) => !v)}>
+            {showEmpty ? 'ซ่อนกองทุนที่ไม่มีข้อมูล' : `แสดงกองทุนที่ไม่มีข้อมูลในช่วงนี้ (${emptyCount})`}
+          </button>
+        )}
         <p className="small muted mb-0 mt-2">
           คนไข้นับไม่ซ้ำด้วยเลขบัตรประชาชน แถวรวมนับคนไข้และ visit ไม่ซ้ำแม้อยู่หลายกองทุน ส่วนจำนวนตามสถานะนับเป็นรายการกองทุนต่อ visit
-          ยอดตั้งเบิกคือราคารวมของรายการที่เข้าเกณฑ์ใน HOSxP ยอดเบิกได้มาจากคอลัมน์ของกองทุนในไฟล์ REP
+          ตั้งเบิก (HOSxP) คือราคารวมของรายการที่เข้าเกณฑ์ใน HOSxP ได้รับ (REP) มาจากคอลัมน์ของกองทุนในไฟล์ REP
         </p>
       </div>
 
@@ -311,10 +319,10 @@ export default function FundReconPage() {
                 <SortTh k="month" sort={monSort.sort} onSort={monSort.toggle}>เดือน</SortTh>
                 <SortTh k="patients" sort={monSort.sort} onSort={monSort.toggle} className="num">คนไข้</SortTh>
                 <SortTh k="visits" sort={monSort.sort} onSort={monSort.toggle} className="num">visit</SortTh>
-                <SortTh k="his_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ยอดตั้งเบิก</SortTh>
-                <SortTh k="stm_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ยอดเบิกได้</SortTh>
-                <SortTh k="pct" sort={monSort.sort} onSort={monSort.toggle} className="num">เบิกได้ %</SortTh>
-                <SortTh k="not_sent" sort={monSort.sort} onSort={monSort.toggle} className="num">ไม่พบใน REP</SortTh>
+                <SortTh k="his_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ตั้งเบิก (HOSxP)</SortTh>
+                <SortTh k="stm_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ได้รับ (REP)</SortTh>
+                <SortTh k="pct" sort={monSort.sort} onSort={monSort.toggle} className="num">ได้รับ %</SortTh>
+                <SortTh k="not_sent" sort={monSort.sort} onSort={monSort.toggle} className="num">ยังไม่พบใน REP</SortTh>
                 <SortTh k="not_sent_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ยอดที่ยังไม่ได้เบิก</SortTh>
                 <SortTh k="extra_paid" sort={monSort.sort} onSort={monSort.toggle} className="num">ได้รับแต่ไม่เข้าเกณฑ์</SortTh>
               </tr>
@@ -388,7 +396,7 @@ export default function FundReconPage() {
         </div>
 
         <div className="table-wrap">
-          <table className="table table-hover data-table">
+          <table className="table table-hover data-table sticky-first">
             <thead>
               <tr>
                 <SortTh k="status" sort={sort} onSort={onSort}>สถานะ</SortTh>
@@ -399,8 +407,8 @@ export default function FundReconPage() {
                 <SortTh k="pttype" sort={sort} onSort={onSort}>สิทธิ</SortTh>
                 <SortTh k="items" sort={sort} onSort={onSort}>รายการที่เข้าเกณฑ์ / เหตุผล</SortTh>
                 <SortTh k="missing" sort={sort} onSort={onSort}>ขาดรายการ</SortTh>
-                <SortTh k="his" sort={sort} onSort={onSort} className="num">ยอดตั้งเบิก</SortTh>
-                <SortTh k="stm" sort={sort} onSort={onSort} className="num">ยอดเบิกได้</SortTh>
+                <SortTh k="his" sort={sort} onSort={onSort} className="num">ตั้งเบิก (HOSxP)</SortTh>
+                <SortTh k="stm" sort={sort} onSort={onSort} className="num">ได้รับ (REP)</SortTh>
                 <SortTh k="diff" sort={sort} onSort={onSort} className="num">ผลต่าง</SortTh>
                 <SortTh k="rep" sort={sort} onSort={onSort}>REP / TRAN_ID / เลขที่ REP</SortTh>
                 <SortTh k="error" sort={sort} onSort={onSort}>รหัสข้อผิดพลาด</SortTh>

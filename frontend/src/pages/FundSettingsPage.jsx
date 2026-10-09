@@ -553,8 +553,8 @@ export default function FundSettingsPage() {
               )}
               </>)}
 
-              <div className="d-flex justify-content-between align-items-center">
-                <span className="small muted">หลังเพิ่มรายการใหม่ ต้องดึงข้อมูล HOSxP ใหม่จึงจะเห็น visit ของรายการนั้น</span>
+              <div className="d-flex justify-content-between align-items-center sticky-actions">
+                <span className="small muted">{dirty ? <strong className="text-warning-emphasis">มีการแก้ไขที่ยังไม่บันทึก · </strong> : null}หลังเพิ่มรายการใหม่ ต้องดึงข้อมูล HOSxP ใหม่จึงจะเห็น visit ของรายการนั้น</span>
                 <div className="d-flex gap-2">
                   {form.originalCode && <button type="button" className="btn btn-outline-danger" onClick={remove}>ลบกองทุน</button>}
                   <button type="button" className="btn btn-primary" onClick={save} disabled={busy || !dirty}>บันทึก</button>

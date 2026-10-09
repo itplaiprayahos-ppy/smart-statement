@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../api/client.js';
 import SortTh from '../components/SortTh.jsx';
+import { notifyDataChanged } from '../utils/dataEvents.js';
 import { useSort } from '../hooks/useSort.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import {
@@ -70,6 +71,7 @@ export default function ImportPage() {
       const { data } = await api.delete('/imports/legacy-stm');
       notifySuccess(`ลบแล้ว ${int(data.deleted)} ไฟล์`);
       loadHistory();
+      notifyDataChanged();
     } catch (err) {
       showError(err);
     }
@@ -161,6 +163,7 @@ export default function ImportPage() {
     }
     setBusy(false);
     loadHistory();
+    notifyDataChanged();
     await (failed ? showError : showSuccess)(
       failed ? `นำเข้าไม่สำเร็จ ${int(failed)} ไฟล์` : 'นำเข้าแล้ว',
       `สำเร็จ ${int(ready.length - failed)} ไฟล์: เพิ่มใหม่ ${int(inserted)} รายการ, อัปเดตรายการเดิม ${int(updated)} รายการ`
@@ -211,7 +214,7 @@ export default function ImportPage() {
           <i className="bi bi-exclamation-triangle" />
           <span className="me-auto">
             ยังมีข้อมูลจากไฟล์ Statement เดิม {int(legacy.batches)} ไฟล์ ({int(legacy.lines)} รายการ)
-            ถ้าใช้คู่กับ REP ยอดเบิกได้จะถูกนับซ้ำ ควรลบออกก่อนนำเข้า REP
+            ถ้าใช้คู่กับ REP ยอดที่ได้รับจะถูกนับซ้ำ ควรลบออกก่อนนำเข้า REP
           </span>
           {isAdmin && (
             <button type="button" className="btn btn-sm btn-danger" onClick={removeLegacy}>ลบข้อมูล Statement เดิม</button>

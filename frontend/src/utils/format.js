@@ -32,7 +32,7 @@ export const STATUS_META = {
   AMOUNT_DIFF: { label: 'ยอดต่าง',              color: 'var(--st-diff)',     hex: '#b7791f', hint: 'พบทั้งสองฝั่ง แต่ยอดไม่เท่ากัน' },
   DENIED:      { label: 'ถูกปฏิเสธ / ติด C',     color: 'var(--st-denied)',   hex: '#b42318', hint: 'สปสช. ส่งรหัสข้อผิดพลาดกลับมา' },
   MULTIPLE:    { label: 'หลายครั้งในวันเดียว',     color: 'var(--st-multiple)', hex: '#6b4fa0', hint: 'ระบบจับคู่ตามลำดับยอดเงิน ควรตรวจสอบ' },
-  NOT_IN_STM:  { label: 'ไม่พบใน REP',     color: 'var(--st-not-stm)',  hex: '#5b6b73', hint: 'มีใน HOSxP แต่ยังไม่มีผลจาก สปสช.' },
+  NOT_IN_STM:  { label: 'ยังไม่พบใน REP',     color: 'var(--st-not-stm)',  hex: '#5b6b73', hint: 'มีใน HOSxP แต่ยังไม่มีผลจาก สปสช.' },
   NOT_IN_HIS:  { label: 'ไม่พบใน HOSxP',        color: 'var(--st-not-his)',  hex: '#2563a6', hint: 'มีใน REP แต่หาใน HOSxP ไม่เจอ' },
 };
 export const STATUS_ORDER = Object.keys(STATUS_META);
@@ -101,7 +101,7 @@ export const FUND_STATUS_META = {
   PAID:     { label: 'ได้รับเงิน',              color: 'var(--st-matched)', hint: 'ส่งเบิกแล้วและได้รับเงินกองทุนนี้' },
   NOT_PAID: { label: 'ไม่ได้รับเงินกองทุนนี้',     color: 'var(--st-diff)',    hint: 'พบใน REP แต่ยอดกองทุนนี้เป็น 0' },
   DENIED:   { label: 'ถูกปฏิเสธ / ติด C',        color: 'var(--st-denied)',  hint: 'สปสช. ส่งรหัสข้อผิดพลาดกลับมา' },
-  NOT_SENT: { label: 'ไม่พบใน REP',       color: 'var(--st-not-stm)', hint: 'ยังไม่ส่งเบิก หรือยังไม่มีผลจาก สปสช.' },
+  NOT_SENT: { label: 'ยังไม่พบใน REP',       color: 'var(--st-not-stm)', hint: 'ยังไม่ส่งเบิก หรือยังไม่มีผลจาก สปสช.' },
 };
 /** สถานะของ visit ที่เข้าเกณฑ์ (ไม่รวมผลตรวจย้อนกลับ) */
 export const FUND_STATUS_ORDER = Object.keys(FUND_STATUS_META);

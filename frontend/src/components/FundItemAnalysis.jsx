@@ -74,9 +74,9 @@ export default function FundItemAnalysis({ mode, params, fundCode, onShowMissing
                 <SortTh k="paid" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ได้รับเงิน</SortTh>
                 <SortTh k="not_paid" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ไม่ได้รับเงินกองทุนนี้</SortTh>
                 <SortTh k="denied" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ถูกปฏิเสธ</SortTh>
-                <SortTh k="not_sent" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ไม่พบใน REP</SortTh>
+                <SortTh k="not_sent" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ยังไม่พบใน REP</SortTh>
                 <SortTh k="rate" sort={itemSort.sort} onSort={itemSort.toggle}>อัตราได้รับเงิน</SortTh>
-                <SortTh k="amount" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ยอดตั้งเบิก</SortTh>
+                <SortTh k="amount" sort={itemSort.sort} onSort={itemSort.toggle} className="num">ตั้งเบิก (HOSxP)</SortTh>
               </tr>
             </thead>
             <tbody>

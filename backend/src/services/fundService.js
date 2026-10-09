@@ -16,7 +16,7 @@ import { baseCte, baseParams } from './reconService.js';
  *  PAID        เข้าเกณฑ์ ส่งเบิกแล้ว และได้รับเงินกองทุนนี้ (ยอดสุทธิทุกเลขที่ REP > 0)
  *  NOT_PAID    เข้าเกณฑ์ พบใน REP แต่ยอดสุทธิของกองทุนนี้เป็น 0 หรือติดลบ
  *  DENIED      เข้าเกณฑ์ แต่ สปสช. ปฏิเสธ / ติด C (ตามรอบล่าสุด)
- *  NOT_SENT    เข้าเกณฑ์ แต่ไม่พบใน REP
+ *  NOT_SENT    เข้าเกณฑ์ แต่ยังไม่พบใน REP
  *  EXTRA_PAID  (ตรวจย้อนกลับ) ได้รับเงินกองทุนนี้ แต่ไม่เข้าเกณฑ์ตามการตั้งค่า
  *  RECEIVED    ยอดที่ได้รับของกองทุนแบบติดตามยอดรับ (FS, DRUG) ไม่มีเกณฑ์คัด visit
  */
@@ -374,7 +374,7 @@ const STATUS_TH = {
   PAID: 'ได้รับเงิน',
   NOT_PAID: 'ไม่ได้รับเงินกองทุนนี้',
   DENIED: 'ถูกปฏิเสธ/ติด C',
-  NOT_SENT: 'ไม่พบใน REP',
+  NOT_SENT: 'ยังไม่พบใน REP',
   EXTRA_PAID: 'ได้รับเงินแต่ไม่เข้าเกณฑ์',
   RECEIVED: 'ได้รับเงิน (ติดตามยอดรับ)',
 };
@@ -398,8 +398,8 @@ export async function exportFunds(opts) {
     'รายการที่เข้าเงื่อนไข / เหตุผล': r.items,
     'ขาดรายการจำเป็น': r.missing_required,
     'ขาดเมื่อเทียบเคสที่ได้รับเงิน': r.missing_common,
-    'ยอดตั้งเบิก (HOSxP)': r.his_fund_amount,
-    'ยอดเบิกได้ (กองทุนนี้)': r.stm_fund_amount,
+    'ตั้งเบิก (HOSxP)': r.his_fund_amount,
+    'ได้รับ (REP) กองทุนนี้': r.stm_fund_amount,
     'ผลต่าง': r.stm_fund_amount === null || r.his_fund_amount === null
       ? null : Math.round((r.stm_fund_amount - r.his_fund_amount) * 100) / 100,
     'REP No.': r.rep_no,
