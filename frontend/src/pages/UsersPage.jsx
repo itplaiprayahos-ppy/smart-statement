@@ -7,7 +7,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { Swal, notifySuccess, showError } from '../utils/alert.js';
 import { thaiDateTime } from '../utils/format.js';
 
-const blank = { id: null, username: '', full_name: '', role: 'user', password: '', is_active: true, fund_codes: [] };
+const blank = { id: null, username: '', full_name: '', role: 'user', password: '', is_active: true, fund_codes: [], point_codes: [] };
 
 export default function UsersPage() {
   const { user: me } = useAuth();
@@ -22,6 +22,11 @@ export default function UsersPage() {
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.get('/funds').then((r) => setFunds(r.data.filter((f) => f.is_active))).catch(() => {}); }, []);
+  const [points, setPoints] = useState([]);
+  useEffect(() => { api.get('/points').then((r) => setPoints(r.data.filter((p) => p.is_active))).catch(() => {}); }, []);
+  const togglePoint = (code) => setForm((f) => ({
+    ...f, point_codes: f.point_codes.includes(code) ? f.point_codes.filter((c) => c !== code) : [...f.point_codes, code],
+  }));
   const toggleFund = (code) => setForm((f) => ({
     ...f, fund_codes: f.fund_codes.includes(code) ? f.fund_codes.filter((c) => c !== code) : [...f.fund_codes, code],
   }));
@@ -31,7 +36,7 @@ export default function UsersPage() {
     try {
       if (form.id) {
         await api.put(`/users/${form.id}`, {
-          full_name: form.full_name, role: form.role, is_active: form.is_active, fund_codes: form.fund_codes,
+          full_name: form.full_name, role: form.role, is_active: form.is_active, fund_codes: form.fund_codes, point_codes: form.point_codes,
         });
       } else {
         await api.post('/users', form);
@@ -95,7 +100,7 @@ export default function UsersPage() {
                   <td>{u.is_active ? 'ใช้งาน' : <span className="text-danger">ปิดใช้งาน</span>}</td>
                   <td>{thaiDateTime(u.last_login_at)}</td>
                   <td className="text-end text-nowrap">
-                    <button type="button" className="btn btn-sm btn-outline-primary me-1" onClick={() => setForm({ ...blank, ...u, password: '', fund_codes: u.fund_codes || [] })}>แก้ไข</button>
+                    <button type="button" className="btn btn-sm btn-outline-primary me-1" onClick={() => setForm({ ...blank, ...u, password: '', fund_codes: u.fund_codes || [], point_codes: u.point_codes || [] })}>แก้ไข</button>
                     <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => resetPassword(u)}>ตั้งรหัสผ่านใหม่</button>
                   </td>
                 </tr>
@@ -149,6 +154,18 @@ export default function UsersPage() {
               </div>
               <div className="form-text">ใช้เลือกกองทุนเริ่มต้นในหน้าส่งออกรายงาน ไม่ได้จำกัดสิทธิ์การดูข้อมูล</div>
             </div>
+            {points.length > 0 && (
+              <div className="mb-3">
+                <div className="form-label">ห้อง/แผนกที่รับผิดชอบ</div>
+                <div className="d-flex flex-wrap gap-2">
+                  {points.map((p) => (
+                    <button key={p.code} type="button" className={`chip ${form.point_codes.includes(p.code) ? 'active' : ''}`}
+                      onClick={() => togglePoint(p.code)} aria-pressed={form.point_codes.includes(p.code)}>{p.name}</button>
+                  ))}
+                </div>
+                <div className="form-text">ใช้เลือกห้อง/แผนกเริ่มต้นในหน้าเทียบ 3 แหล่ง</div>
+              </div>
+            )}
             {!form.id && (
               <div className="mb-3">
                 <label className="form-label" htmlFor="pw">รหัสผ่านเริ่มต้น</label>

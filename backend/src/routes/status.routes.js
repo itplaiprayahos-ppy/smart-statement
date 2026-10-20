@@ -12,12 +12,12 @@ router.get('/', asyncHandler(async (_req, res) => {
       (SELECT MAX(service_date) FROM nhso_lines WHERE claim_type = 'OPD') AS rep_max_date,
       (SELECT MAX(created_at) FROM his_pull_logs WHERE claim_type = 'OPD') AS his_at,
       (SELECT MAX(date_to) FROM his_pull_logs WHERE claim_type = 'OPD') AS his_max_date,
-      (SELECT MAX(created_at) FROM registry_batches) AS reg_at,
-      (SELECT COUNT(DISTINCT fund_code)::int FROM registry_rows) AS reg_funds,
+      GREATEST((SELECT MAX(created_at) FROM registry_batches), (SELECT MAX(created_at) FROM point_registry_batches)) AS reg_at,
+      (SELECT COUNT(DISTINCT fund_code)::int FROM registry_rows) + (SELECT COUNT(DISTINCT point_code)::int FROM point_registry_rows) AS reg_funds,
       -- ช่วงวันที่ของทะเบียนที่อัปโหลดหลังดึง HOSxP ล่าสุด
-      (SELECT MIN(date_from)::text FROM registry_batches
+      (SELECT MIN(date_from)::text FROM (SELECT date_from, created_at FROM registry_batches UNION ALL SELECT date_from, created_at FROM point_registry_batches) b
         WHERE created_at > COALESCE((SELECT MAX(created_at) FROM his_pull_logs WHERE claim_type = 'OPD'), '-infinity')) AS reg_from,
-      (SELECT MAX(date_to)::text FROM registry_batches
+      (SELECT MAX(date_to)::text FROM (SELECT date_to, created_at FROM registry_batches UNION ALL SELECT date_to, created_at FROM point_registry_batches) b
         WHERE created_at > COALESCE((SELECT MAX(created_at) FROM his_pull_logs WHERE claim_type = 'OPD'), '-infinity')) AS reg_to`);
   // ช่วงไม่เกิน 366 วัน (ข้อจำกัดการดึง HOSxP ต่อครั้ง) โดยเก็บช่วงล่าสุดไว้
   const cap = (from, to) => {

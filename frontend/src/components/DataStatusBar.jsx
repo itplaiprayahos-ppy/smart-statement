@@ -46,7 +46,7 @@ export default function DataStatusBar() {
         <span className="item" title="อัปโหลดทะเบียนล่าสุด">
           <i className="bi bi-journal-text" aria-hidden="true" />
           <strong>ทะเบียน</strong>{' '}
-          {st.registry.at ? <>อัปโหลด {shortDate(st.registry.at)} <span className="sub">{st.registry.funds} กองทุน</span></> : <span className="sub">ยังไม่มี</span>}
+          {st.registry.at ? <>อัปโหลด {shortDate(st.registry.at)} <span className="sub">{st.registry.funds} ทะเบียน</span></> : <span className="sub">ยังไม่มี</span>}
         </span>
       )}
       {warn && (

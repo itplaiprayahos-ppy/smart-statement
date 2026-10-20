@@ -1,11 +1,13 @@
 import * as XLSX from 'xlsx';
 import { parseDate } from '../utils/dates.js';
 import { norm, parseMoney, text } from './excelParser.js';
+import { env } from '../config/env.js';
 
 /**
  * อ่านไฟล์ Excel ทะเบียนบริการของหน้างาน (หนึ่งแถว = หนึ่งบริการ)
  * หาแถวหัวตารางเองจากชื่อคอลัมน์ที่รู้จัก ไม่ต้องตั้งรูปแบบไฟล์
- * ต้องมี: วันที่, HN (หรือเลขบัตร), รายการ (ชื่อหรือ icode)
+ * ต้องมี: วันที่, HN (หรือเลขบัตร)
+ * รายการค่าบริการและราคาไม่บังคับ: แถวที่มีรายการเทียบระดับรายการ แถวที่ไม่มีรายการเทียบระดับ visit
  */
 export const REGISTRY_COLUMNS = {
   service_date: { label: 'วันที่ให้บริการ', aliases: ['วันที่ให้บริการ', 'วันที่รับบริการ', 'วันรับบริการ', 'วันที่บริการ', 'วันที่บันทึก', 'วันที่', 'date', 'vstdate'] },
@@ -15,13 +17,21 @@ export const REGISTRY_COLUMNS = {
   icode:        { label: 'icode', aliases: ['icode', 'รหัสรายการ', 'รหัสค่าบริการ'] },
   item_text:    { label: 'รายการค่าบริการ', aliases: ['รายการค่าบริการ', 'รายการบริการ', 'ชื่อรายการ', 'รายการ', 'บริการ', 'ค่าบริการ'] },
   qty:          { label: 'จำนวน', aliases: ['จำนวน', 'qty'] },
-  price:        { label: 'ราคา', aliases: ['ราคา', 'จำนวนเงิน', 'ราคารวม', 'ค่าบริการ(บาท)', 'บาท'] },
+  price:        { label: 'ราคา / ยอดรวม', aliases: ['ราคา', 'จำนวนเงิน', 'ราคารวม', 'ยอดรวม', 'ยอดเงิน', 'รวมเงิน', 'ยอดค่าใช้จ่าย', 'ค่าใช้จ่าย', 'ค่าบริการ(บาท)', 'บาท', 'รวม'] },
 };
 const KEYS = Object.keys(REGISTRY_COLUMNS);
 const MAX_ERRORS = 300;
 
 export const itemKey = (s) => norm(s).replace(/[.,;:'"()[\]{}\-_/]/g, '');
 export const hnKey = (hn) => (hn ? String(hn).trim().replace(/^0+/, '') || '0' : null);
+
+/** HN ที่เป็นตัวเลขล้วนแต่สั้นกว่า HN_LENGTH หลัก: เติม 0 ด้านหน้าให้ครบ เช่น 1234 -> 000001234 */
+export function padHn(hn, length = env.hnLength) {
+  if (hn === null || hn === undefined) return null;
+  const s = String(hn).trim().replace(/\.0+$/, ''); // Excel อาจเก็บเป็นตัวเลข 1234.0
+  if (!s) return null;
+  return /^\d+$/.test(s) && s.length < length ? s.padStart(length, '0') : s;
+}
 
 /** แถวหัวตาราง = แถวใน 20 แถวแรกที่ตรงกับชื่อคอลัมน์ที่รู้จักมากที่สุด */
 function detectHeader(rows) {
@@ -60,10 +70,12 @@ export function parseRegistry(buffer) {
   const missing = [];
   if (cols.service_date === undefined) missing.push('วันที่ให้บริการ');
   if (cols.hn === undefined && cols.cid === undefined) missing.push('HN');
-  if (cols.item_text === undefined && cols.icode === undefined) missing.push('รายการค่าบริการ');
 
   const result = {
     sheetName,
+    sheetNames: wb.SheetNames,
+    // ข้อความเหนือหัวตาราง (ชื่อรายงาน เช่น "ทะเบียนทันตกรรม") ใช้เดาแผนก
+    titleText: rows.slice(0, Math.max(idx, 0)).flat().map((v) => text(v)).filter(Boolean).join(' '),
     headerRowNumber: idx + 1,
     columns: Object.fromEntries(Object.entries(cols).map(([f, c]) => [f, text(rows[idx][c])])),
     missingRequired: missing,
@@ -73,6 +85,7 @@ export function parseRegistry(buffer) {
     totalRows: 0,
     dateFrom: null,
     dateTo: null,
+    visitLevelRows: 0,     // แถวที่ไม่มีรายการค่าบริการ (เทียบระดับ visit)
   };
   if (missing.length) return result;
 
@@ -81,7 +94,7 @@ export function parseRegistry(buffer) {
     const row = rows[i] || [];
     if (row.every((v) => text(v) === null)) continue;
     const rowNumber = i + 1;
-    const hn = text(get(row, 'hn'));
+    const hn = padHn(text(get(row, 'hn')));
     const cidRaw = text(get(row, 'cid'));
     const cid = cidRaw ? cidRaw.replace(/\D/g, '') : null;
     const itemText = text(get(row, 'item_text'));
@@ -95,7 +108,6 @@ export function parseRegistry(buffer) {
     const date = parseDate(rawDate);
     if (!date) problems.push(`วันที่อ่านไม่ได้ (${text(rawDate) ?? 'ว่าง'})`);
     if (!hn && !(cid && cid.length === 13)) problems.push('ไม่มี HN หรือเลขบัตรประชาชน');
-    if (!itemText && !icode) problems.push('ไม่มีรายการค่าบริการ');
     const qty = parseMoney(get(row, 'qty'));
     const price = parseMoney(get(row, 'price'));
     if (qty.error) problems.push(`จำนวนไม่ถูกต้อง (${text(get(row, 'qty'))})`);
@@ -118,6 +130,7 @@ export function parseRegistry(buffer) {
       qty: qty.value,
       price: price.value,
     });
+    if (!itemText && !icode) result.visitLevelRows += 1;
     if (!result.dateFrom || date < result.dateFrom) result.dateFrom = date;
     if (!result.dateTo || date > result.dateTo) result.dateTo = date;
   }

@@ -27,6 +27,10 @@ export const env = {
   // กลุ่มสิทธิ (hipdata_code) ที่ไม่นับเข้ากองทุนเสมอ เช่น ชำระเงินเอง คั่นด้วยจุลภาค
   excludedHipdata: String(process.env.EXCLUDED_HIPDATA ?? 'XXX')
     .split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z0-9_]{1,10}$/.test(s)),
+  // จำนวนหลักของ HN ใน HOSxP: HN ในทะเบียนที่สั้นกว่านี้จะถูกเติม 0 ด้านหน้า
+  hnLength: Math.min(Math.max(Number(process.env.HN_LENGTH) || 9, 1), 20),
+  // รัน migration ที่ค้างอยู่ให้อัตโนมัติตอนเปิดเซิร์ฟเวอร์ (ค่าเริ่มต้น: ไม่รัน แต่หยุดและแจ้งให้รัน npm run migrate)
+  autoMigrate: ['1', 'true', 'yes'].includes(String(process.env.AUTO_MIGRATE || '').toLowerCase()),
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresHours: Number(process.env.JWT_EXPIRES_HOURS || 8),
 };

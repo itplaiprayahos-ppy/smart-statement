@@ -135,3 +135,29 @@ INSERT INTO ovstdiag (vn, icd10, diagtype, vstdate)
 SELECT vn, 'Z515', '2', vstdate FROM vn_stat WHERE right(vn, 6)::int % 6 = 0
 UNION ALL
 SELECT vn, 'H251', '2', vstdate FROM vn_stat WHERE right(vn, 6)::int % 11 = 0;
+
+-- ---------------------------------------------------------------------
+-- แผนก / จุดบันทึกค่าใช้จ่าย (ใช้ทดสอบการเทียบยอดตามจุดบริการ)
+-- ---------------------------------------------------------------------
+DROP TABLE IF EXISTS kskdepartment;
+CREATE TABLE kskdepartment (depcode VARCHAR(3) PRIMARY KEY, department VARCHAR(100));
+INSERT INTO kskdepartment VALUES
+  ('001', '001 ห้องตรวจผู้ป่วยนอก'), ('002', '002 ห้องจ่ายยา'), ('005', '007 ห้องตรวจทันตกรรม'),
+  ('012', '012 กายภาพบำบัด'), ('020', '020 รังสีวิทยา'), ('021', '021 ห้องอุบัติเหตุฉุกเฉิน');
+-- ชื่อแผนกจริงใน HOSxP มักมีเลขลำดับนำหน้า (เช่น 007, 007.1) ทดสอบการเดาแผนกจากชื่อไฟล์ให้ครอบคลุมกรณีนี้
+
+ALTER TABLE opitemrece ADD COLUMN dep_code VARCHAR(3);
+UPDATE opitemrece SET dep_code = CASE icode
+  WHEN '3400001' THEN '001' WHEN '1000001' THEN '002' WHEN '1600001' THEN '002'
+  WHEN '3000001' THEN '020' WHEN '3100001' THEN '021' ELSE '001' END;
+
+-- ทันตกรรม (บาง visit) และกายภาพบำบัด (บาง visit) บาง visit ไปทั้งสองจุด
+INSERT INTO nondrugitems (icode, name, price, istatus) VALUES
+  ('3500001', 'ขูดหินปูน', 500, 'Y'), ('3500002', 'อุดฟัน', 400, 'Y'), ('3600001', 'กายภาพบำบัด', 300, 'Y')
+ON CONFLICT DO NOTHING;
+INSERT INTO opitemrece (vn, hn, vstdate, icode, qty, sum_price, dep_code)
+SELECT vn, hn, vstdate, '3500001', 1, 500, '005' FROM vn_stat WHERE right(vn, 6)::int % 5 = 0
+UNION ALL
+SELECT vn, hn, vstdate, '3500002', 1, 400, '005' FROM vn_stat WHERE right(vn, 6)::int % 10 = 0
+UNION ALL
+SELECT vn, hn, vstdate, '3600001', 1, 300, '012' FROM vn_stat WHERE right(vn, 6)::int % 6 = 0;

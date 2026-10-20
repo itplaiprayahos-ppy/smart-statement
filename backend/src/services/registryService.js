@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import { db, hosxp, withTransaction } from '../config/db.js';
 import { withFundTable } from './fundService.js';
-import { annotateErrors, splitCodes } from './errorCodeService.js';
+import { annotateErrors, formatCodes } from './errorCodeService.js';
 import { itemKey } from './registryParser.js';
 import { sortRows } from '../utils/sort.js';
 
@@ -77,7 +77,8 @@ async function resolveItems(fundCode, records) {
 export async function previewRegistry(fundCode, parsed) {
   const records = await resolveItems(fundCode, parsed.records);
   const unknown = {};
-  records.filter((r) => !r.icode).forEach((r) => { unknown[r.item_text] = (unknown[r.item_text] || 0) + 1; });
+  // ชื่อรายการที่ไม่รู้จัก (แถวที่ไม่มีรายการเลยไม่นับ เพราะเทียบระดับ visit)
+  records.filter((r) => !r.icode && r.item_text).forEach((r) => { unknown[r.item_text] = (unknown[r.item_text] || 0) + 1; });
   return {
     records,
     unknownItems: Object.entries(unknown).map(([text, count]) => ({ text, count })).sort((a, b) => b.count - a.count),
@@ -109,7 +110,11 @@ export async function importRegistry({ fundCode, fileName, parsed, userId }) {
       }).join(',')})`);
       await c.query(`INSERT INTO registry_rows (${cols.join(',')}) VALUES ${values.join(',')}`, params);
     }
-    return { batchId: b.id, inserted: records.length, replaced, unknown: records.filter((r) => !r.icode).length };
+    return {
+      batchId: b.id, inserted: records.length, replaced,
+      unknown: records.filter((r) => !r.icode && r.item_text).length,
+      visitLevel: records.filter((r) => !r.icode && !r.item_text).length,
+    };
   });
 }
 
@@ -146,6 +151,7 @@ export const COMPARE_STATUSES = {
   UNKNOWN_ITEM:    { label: 'ยังไม่รู้จักรายการ' },
   NO_VISIT:        { label: 'ไม่พบ visit ใน HOSxP' },
   NOT_CHARGED:     { label: 'ยังไม่ลงค่าบริการใน HOSxP' },
+  NOT_ELIGIBLE:    { label: 'มี visit แต่ไม่เข้าเกณฑ์กองทุน' },
   PRICE_DIFF:      { label: 'ราคาไม่ตรงกัน' },
   DENIED:          { label: 'ส่งเบิกแล้วติด C' },
   NOT_CLAIMED:     { label: 'ยังไม่พบใน REP' },
@@ -156,7 +162,7 @@ const ORDER = Object.keys(COMPARE_STATUSES);
 const near = (a, b) => Math.abs(Number(a) - Number(b)) < 0.01;
 const money = (v) => Number(v).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-async function compareRows(fundCode, range) {
+export async function compareRows(fundCode, range) {
   return withFundTable({ ...range, fund: null, fundCode, onlyClaimable: false }, async (c) => {
     const { rows: [fund] } = await c.query('SELECT code, name, match_mode, track_only FROM funds WHERE code = $1', [fundCode]);
     // ทะเบียน + visit ที่จับคู่ได้ (HN หรือเลขบัตร + วันที่) เลือก visit ที่มีรายการนั้นก่อน
@@ -177,7 +183,8 @@ async function compareRows(fundCode, range) {
              rg.icode, COALESCE(rg.item_name, rg.item_text) AS item, rg.item_text, rg.qty AS reg_qty, rg.price AS reg_price,
              rg.vn, v.hn AS his_hn, (hi.vn IS NOT NULL) AS charged, hi.qty AS his_qty, hi.sum_price AS his_price,
              f.fund_status, f.stm_fund_amount, f.error_code, f.tran_id, f.stm_docs,
-             COUNT(*) OVER (PARTITION BY rg.vn, rg.icode) AS dup_n
+             COUNT(*) OVER (PARTITION BY rg.vn, rg.icode) AS dup_n,
+             (rg.icode IS NULL AND rg.item_key IS NULL) AS visit_level, f.his_fund_amount
       FROM rg
       LEFT JOIN his_opd_visits v ON v.vn = rg.vn
       LEFT JOIN his_opd_items hi ON hi.vn = rg.vn AND hi.icode = rg.icode
@@ -187,18 +194,19 @@ async function compareRows(fundCode, range) {
       -- มีใน HOSxP (รายการของกองทุน) แต่ไม่อยู่ในทะเบียน
       SELECT 'HIS', NULL, fy.sdate::text, fy.hn, fy.cid, fy.patient_name, i.icode, COALESCE(i.item_name, fi.item_name), NULL,
              NULL, NULL, fy.vn, fy.hn, TRUE, i.qty, i.sum_price,
-             fy.fund_status, fy.stm_fund_amount, fy.error_code, fy.tran_id, fy.stm_docs, 1
+             fy.fund_status, fy.stm_fund_amount, fy.error_code, fy.tran_id, fy.stm_docs, 1, FALSE, NULL
       FROM fy
       JOIN his_opd_items i ON i.vn = fy.vn
       JOIN fund_items fi ON fi.fund_code = $1 AND fi.icode = i.icode
       WHERE $2::text = 'items' AND fy.fund_status NOT IN ('RECEIVED')
-        AND NOT EXISTS (SELECT 1 FROM rg WHERE rg.vn = fy.vn AND rg.icode = i.icode)
+        AND NOT EXISTS (SELECT 1 FROM rg WHERE rg.vn = fy.vn
+                          AND (rg.icode = i.icode OR (rg.icode IS NULL AND rg.item_key IS NULL)))
 
       UNION ALL
       -- ระดับ visit: กองทุนแบบสิทธิ/ICD-10 และรายการที่ REP จ่ายเงินแต่ไม่อยู่ในทะเบียน
       SELECT 'HIS', NULL, fy.sdate::text, fy.hn, fy.cid, fy.patient_name, NULL, fy.items, NULL,
              NULL, NULL, fy.vn, fy.hn, fy.vn IS NOT NULL, NULL, fy.his_fund_amount,
-             fy.fund_status, fy.stm_fund_amount, fy.error_code, fy.tran_id, fy.stm_docs, 1
+             fy.fund_status, fy.stm_fund_amount, fy.error_code, fy.tran_id, fy.stm_docs, 1, FALSE, NULL
       FROM fy
       WHERE fy.fund_status <> 'RECEIVED'
         AND ($2::text <> 'items' OR fy.fund_status = 'EXTRA_PAID')
@@ -219,16 +227,39 @@ async function compareRows(fundCode, range) {
 }
 
 /** สรุปสถานะและ "จุดที่ต่าง" ของแต่ละแถว */
-function evaluate(r) {
+export function evaluate(r) {
   const issues = [];
   const paid = Number(r.stm_fund_amount || 0) > 0;
   // REP ใช้ "-" แทน "ไม่มีข้อผิดพลาด"
-  const err = splitCodes(r.error_code).length ? r.error_code : null;
+  const err = formatCodes(r.error_code);
   let status;
   if (r.src === 'HIS') {
     status = 'NOT_IN_REGISTRY';
     issues.push(r.charged ? 'มีใน HOSxP แต่ไม่อยู่ในทะเบียน' : 'มียอดใน REP แต่ไม่อยู่ในทะเบียนและไม่พบ visit');
     if (paid) issues.push(`REP จ่าย ${money(r.stm_fund_amount)}`);
+  } else if (r.visit_level) {
+    // ทะเบียนไม่มีรายการค่าบริการ: เทียบระดับ visit
+    const eligible = r.fund_status && !['EXTRA_PAID', 'RECEIVED'].includes(r.fund_status);
+    if (!r.vn) {
+      status = 'NO_VISIT';
+      issues.push('ไม่พบ visit ใน HOSxP วันที่นี้ (ตรวจ HN และวันที่ในทะเบียน)');
+    } else if (!eligible) {
+      status = 'NOT_ELIGIBLE';
+      issues.push(paid
+        ? `REP จ่าย ${money(r.stm_fund_amount)} แต่ visit ไม่เข้าเกณฑ์ตามการตั้งค่ากองทุน (ตรวจการตั้งค่ากองทุน)`
+        : 'มี visit แต่ไม่เข้าเกณฑ์กองทุน (ตรวจการลงค่าบริการ สิทธิ หรือรหัสโรคใน HOSxP)');
+    } else if (r.fund_status === 'DENIED' || (err && !paid)) {
+      status = 'DENIED';
+      issues.push(`ติด ${err || 'C'}${r.error_detail ? `: ${r.error_detail.split('\n')[0].replace(/^\w+: /, '')}` : ''}`);
+    } else if (r.fund_status === 'NOT_SENT') {
+      status = 'NOT_CLAIMED';
+      issues.push('ยังไม่พบใน REP (ยังไม่ส่งเบิก หรือ REP ยังไม่ออก)');
+    } else if (!paid) {
+      status = 'NOT_PAID';
+      issues.push('พบใน REP แต่ไม่ได้รับเงินกองทุนนี้');
+    } else {
+      status = 'MATCH';
+    }
   } else if (!r.icode) {
     status = 'UNKNOWN_ITEM';
     issues.push(`ยังไม่รู้จักรายการ "${r.item_text}" กรุณาจับคู่กับรายการใน HOSxP`);
@@ -245,7 +276,7 @@ function evaluate(r) {
     if (!priceOk) issues.push(`ราคาไม่ตรง: ทะเบียน ${money(r.reg_price)}, HOSxP ${money(r.his_price)}`);
     if (r.fund_status === 'DENIED' || (err && !paid)) {
       status = 'DENIED';
-      issues.push(`ติด C ${err || ''}${r.error_detail ? `: ${r.error_detail.split('\n')[0].replace(/^\w+: /, '')}` : ''}`.trim());
+      issues.push(`ติด ${err || 'C'}${r.error_detail ? `: ${r.error_detail.split('\n')[0].replace(/^\w+: /, '')}` : ''}`);
     } else if (!r.fund_status || r.fund_status === 'NOT_SENT') {
       status = 'NOT_CLAIMED';
       issues.push('ยังไม่พบใน REP (ยังไม่ส่งเบิก หรือ REP ยังไม่ออก)');
@@ -256,7 +287,7 @@ function evaluate(r) {
     if (!status) status = priceOk ? 'MATCH' : 'PRICE_DIFF';
     else if (!priceOk && ORDER.indexOf('PRICE_DIFF') < ORDER.indexOf(status)) status = 'PRICE_DIFF';
   }
-  if (r.src === 'REG' && Number(r.dup_n) > 1 && r.vn && r.icode) issues.push(`บันทึกซ้ำในทะเบียน ${r.dup_n} แถว`);
+  if (r.src === 'REG' && Number(r.dup_n) > 1 && r.vn && (r.icode || r.visit_level)) issues.push(`บันทึกซ้ำในทะเบียน ${r.dup_n} แถว`);
 
   return {
     ...r,
@@ -265,7 +296,11 @@ function evaluate(r) {
     status,
     issues: status === 'MATCH' && !issues.length ? ['ตรงกันครบ'] : issues,
     registry: r.src === 'REG' ? { ok: true, amount: r.reg_price } : { ok: false },
+    item: r.visit_level ? 'ทั้ง visit (ทะเบียนไม่ระบุรายการ)' : r.item,
     his: !r.vn ? { ok: false, note: 'ไม่พบ visit' }
+      : r.visit_level
+        ? (r.fund_status && !['EXTRA_PAID', 'RECEIVED'].includes(r.fund_status)
+          ? { ok: true, amount: r.his_fund_amount } : { ok: false, note: 'ไม่เข้าเกณฑ์' })
       : r.charged ? { ok: true, amount: r.his_price }
         : { ok: false, note: status === 'UNKNOWN_ITEM' ? 'ไม่ทราบรายการ' : 'ไม่ได้ลงรายการ' },
     rep: paid ? { ok: true, amount: r.stm_fund_amount }
@@ -332,7 +367,7 @@ export async function exportCompare(opts) {
       'icode': r.icode,
       'ทะเบียน: ราคา': r.registry.ok ? r.reg_price : null,
       'HOSxP: VN': r.vn,
-      'HOSxP: ราคา': r.his.ok ? Number(r.his_price) : null,
+      'HOSxP: ยอด': r.his.ok ? Number(r.his.amount) : null,
       'REP: ยอดกองทุน': r.rep.ok ? Number(r.stm_fund_amount) : null,
       'REP: TRAN_ID': r.tran_id,
       'REP: รหัสข้อผิดพลาด': r.error_code,
@@ -373,8 +408,10 @@ export async function registryTemplate(fundCode) {
     ['วิธีกรอก'],
     ['หนึ่งแถว = หนึ่งบริการ ถ้า visit เดียวให้ 2 รายการ ให้ลง 2 แถว'],
     ['วันที่ให้บริการ: วัน/เดือน/ปี พ.ศ. เช่น 15/09/2569 (วันที่ให้บริการจริง ไม่ใช่วันที่ลงบันทึก)'],
-    ['HN และเลขบัตรประชาชน: ตั้งรูปแบบเซลล์เป็นข้อความไว้แล้ว เลข 0 ด้านหน้าจะไม่หาย และเลขบัตรไม่กลายเป็น 1.23E+12'],
+    ['HN และเลขบัตรประชาชน: ตั้งรูปแบบเซลล์เป็นข้อความไว้แล้ว เลขบัตรจะไม่กลายเป็น 1.23E+12 ถ้าใส่ HN ไม่ครบ 9 หลัก ระบบเติม 0 ด้านหน้าให้เอง (เช่น 1234 เป็น 000001234)'],
     ['ระบบจับคู่คนไข้ด้วย HN + วันที่ ถ้ามีเลขบัตรประชาชน จะใช้จับคู่ด้วย (กรณี HN พิมพ์ผิดหรือคนไข้มีหลาย HN)'],
+    ['ต้องมี: วันที่ให้บริการ และ HN (หรือเลขบัตรประชาชน)'],
+    ['รายการค่าบริการและราคา ไม่บังคับ: ถ้าใส่ ระบบเทียบละเอียดถึงระดับรายการ (ลงค่าบริการแล้วหรือยัง ราคาตรงไหม) ถ้าไม่ใส่ ระบบเทียบระดับ visit (มี visit ไหม เข้าเกณฑ์กองทุนไหม ได้รับเงินไหม)'],
     ['รายการค่าบริการ: แนะนำให้คัดลอกชื่อจากชีต "รายการค่าบริการ" ชื่ออื่นที่ระบบไม่รู้จักจะให้ผู้รับผิดชอบจับคู่ครั้งเดียว'],
     ['ราคา: ราคารวมของรายการนั้นใน visit นั้น'],
   ]);

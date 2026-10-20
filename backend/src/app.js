@@ -20,6 +20,7 @@ import fundRoutes from './routes/funds.routes.js';
 import reportRoutes from './routes/reports.routes.js';
 import registryRoutes from './routes/registry.routes.js';
 import statusRoutes from './routes/status.routes.js';
+import pointRoutes from './routes/points.routes.js';
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.use('/api/funds', fundRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/registry', registryRoutes);
 app.use('/api/status', statusRoutes);
+app.use('/api/points', pointRoutes);
 app.use('/api', notFound);
 
 // production: ให้ Express เสิร์ฟหน้าเว็บที่ build แล้ว (frontend/dist)

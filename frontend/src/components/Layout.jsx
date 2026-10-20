@@ -15,6 +15,7 @@ const MENU = [
   { group: 'ผู้ดูแลระบบ', admin: true },
   { to: '/mappings', icon: 'bi-table', label: 'รูปแบบไฟล์ Excel', admin: true },
   { to: '/funds/settings', icon: 'bi-sliders', label: 'ตั้งค่ากองทุน', admin: true },
+  { to: '/points/settings', icon: 'bi-geo-alt', label: 'จัดการห้อง/แผนก', admin: true },
   { to: '/users', icon: 'bi-people', label: 'ผู้ใช้งาน', admin: true },
 ];
 

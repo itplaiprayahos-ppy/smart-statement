@@ -1,4 +1,5 @@
 import { db, hosxp, withTransaction } from '../config/db.js';
+import { optionalFeeIcodes } from './settingsService.js';
 
 /**
  * ดึงข้อมูล OPD จาก HOSxP v4 (PostgreSQL)
@@ -111,6 +112,24 @@ const DX_SQL = `
 `;
 const DX_COLS = ['vn', 'icd10', 'diagtype', 'vstdate'];
 
+/** ยอดค่าใช้จ่ายของทุก visit แยกตามห้อง/แผนกที่บันทึก (opitemrece.dep_code) ใช้เทียบกับทะเบียนของแต่ละห้อง/แผนก */
+const DEP_SQL = `
+  SELECT o.vn, COALESCE(NULLIF(trim(o.dep_code::text), ''), '-') AS dep_code,
+         MIN(o.vstdate)::text AS vstdate, SUM(COALESCE(o.sum_price, 0)) AS amount, COUNT(*)::int AS items,
+         -- ค่าบริการที่ติดอัตโนมัติ (ตั้งค่าที่หน้าจัดการห้อง/แผนก) ทะเบียนจะรวมหรือไม่รวมก็ได้
+         COALESCE(SUM(o.sum_price) FILTER (WHERE o.icode = ANY($3::text[])), 0) AS optional_amount
+  FROM opitemrece o
+  WHERE o.vstdate BETWEEN $1 AND $2 AND o.vn IS NOT NULL AND o.vn <> ''
+  GROUP BY o.vn, COALESCE(NULLIF(trim(o.dep_code::text), ''), '-')
+`;
+const DEP_COLS = ['vn', 'dep_code', 'vstdate', 'amount', 'items', 'optional_amount'];
+
+/** รายชื่อแผนก (dep_code) ของ HOSxP */
+export async function listDepartments() {
+  const { rows } = await hosxp.query('SELECT depcode::text AS code, department AS name FROM kskdepartment ORDER BY depcode');
+  return rows;
+}
+
 const ITEM_COLS = ['vn', 'icode', 'vstdate', 'qty', 'sum_price', 'item_name', 'source'];
 
 const COLS = ['vn', 'hn', 'cid', 'ptname', 'vstdate', 'pttype', 'pttype_name', 'hipdata_code', 'pdx', 'income', 'uc_money'];
@@ -180,6 +199,21 @@ async function replaceItems(client, dateFrom, dateTo, items) {
   }
 }
 
+async function replaceDep(client, dateFrom, dateTo, rows) {
+  await client.query('DELETE FROM his_opd_dep WHERE vstdate BETWEEN $1 AND $2', [dateFrom, dateTo]);
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const params = [];
+    const values = chunk.map((r) => `(${DEP_COLS.map((c) => { params.push(r[c]); return `$${params.length}`; }).join(',')})`);
+    await client.query(
+      `INSERT INTO his_opd_dep (${DEP_COLS.join(',')}) VALUES ${values.join(',')}
+       ON CONFLICT (vn, dep_code) DO UPDATE SET vstdate = EXCLUDED.vstdate, amount = EXCLUDED.amount, items = EXCLUDED.items,
+         optional_amount = EXCLUDED.optional_amount`,
+      params,
+    );
+  }
+}
+
 async function replaceDx(client, dateFrom, dateTo, rows) {
   await client.query('DELETE FROM his_opd_dx WHERE vstdate BETWEEN $1 AND $2', [dateFrom, dateTo]);
   for (let i = 0; i < rows.length; i += CHUNK) {
@@ -208,15 +242,18 @@ export async function pullOpd({ dateFrom, dateTo, userId }) {
      SELECT DISTINCT icode FROM registry_rows WHERE icode IS NOT NULL`,
   );
   const icodes = icodeRows.map((r) => r.icode);
+  const optionalIcodes = await optionalFeeIcodes();
 
   for (const [from, to] of months) {
     const { rows: visits } = await hosxp.query(OPD_SQL, [from, to]);
     const items = icodes.length ? (await hosxp.query(ITEMS_SQL, [from, to, icodes])).rows : [];
     const dx = (await hosxp.query(DX_SQL, [from, to])).rows;
+    const dep = (await hosxp.query(DEP_SQL, [from, to, optionalIcodes])).rows;
     await withTransaction(async (client) => {
       await replaceSnapshot(client, from, to, visits);
       await replaceItems(client, from, to, items);
       await replaceDx(client, from, to, dx);
+      await replaceDep(client, from, to, dep);
     });
     rowCount += visits.length;
     itemCount += items.length;

@@ -358,3 +358,129 @@ th.sortable .th-sort:focus-visible { outline: 2px solid var(--cr-accent); outlin
   .data-status-bar { gap: 0.25rem 0.8rem; }
   .data-status-bar .item.fix { margin-left: 0; }
 }
+
+/* ---------- เทียบยอดตามห้อง/แผนก: ยอดแยกแผนก ---------- */
+.breakdown-row > td { background: #f7faf9 !important; padding: 0.5rem 1rem 0.75rem 2rem; }
+.breakdown { max-width: 640px; }
+.breakdown .table td { background: transparent; padding: 0.2rem 0.5rem; border-color: var(--cr-line); }
+.registry-tabs { margin-bottom: 1rem; }
+
+/* ---------- เทียบ 3 แหล่ง (ห้อง/แผนก): ตาราง 6 คอลัมน์ ---------- */
+.cmp-strip {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 1.5rem;
+  padding-bottom: 0.6rem; margin-bottom: 0.6rem; border-bottom: 1px solid var(--cr-line);
+  font-variant-numeric: tabular-nums;
+}
+.cmp-strip .item { display: inline-flex; align-items: baseline; gap: 0.4rem; white-space: nowrap; }
+.cmp-strip .lbl { font-size: 0.8rem; color: var(--cr-muted); display: inline-flex; gap: 0.3rem; }
+.cmp-strip .lbl i { color: var(--cr-primary); }
+.cmp-strip strong { font-size: 1.05rem; font-weight: 600; }
+.cmp-strip .paid { color: var(--st-matched); }
+.cmp-strip .sep, .cmp-strip .sub, .cmp-strip .unit { color: var(--cr-muted); font-size: 0.8rem; }
+.cmp-pills { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-bottom: 0.6rem; }
+.cmp-pill {
+  display: inline-flex; align-items: center; gap: 0.3rem; border: 1px solid var(--cr-line); background: #fff;
+  border-radius: 999px; padding: 0.15rem 0.7rem; font-size: 0.82rem; color: var(--cr-ink);
+}
+.cmp-pill i { color: var(--c, var(--cr-primary)); }
+.cmp-pill .n { font-weight: 600; color: var(--c, var(--cr-primary)); font-variant-numeric: tabular-nums; }
+.cmp-pill:hover { background: #f8faf9; }
+.cmp-pill.active { border-color: var(--c, var(--cr-primary)); background: color-mix(in srgb, var(--c, var(--cr-primary)) 9%, #fff); box-shadow: inset 0 0 0 1px var(--c, var(--cr-primary)); }
+.cmp3-table { min-width: 760px; }
+.cmp3-table td { vertical-align: top; }
+.cmp3-table .pt-cell { max-width: 220px; }
+.cmp3-table .pt-cell .hn { font-variant-numeric: tabular-nums; }
+.cmp3-table .result-cell { min-width: 230px; max-width: 360px; }
+.cmp-row { cursor: pointer; }
+.cmp-row:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: -2px; }
+.cmp-row.open > td { background: #eef5f4; border-bottom-color: transparent; }
+.cmp-badge {
+  display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--c);
+  background: color-mix(in srgb, var(--c) 10%, #fff); border-radius: 999px; padding: 0.05rem 0.55rem; white-space: nowrap;
+}
+.cmp3-table .reason { font-size: 0.8rem; color: var(--cr-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 0.15rem; }
+.cmp3-table .reason .more { margin-left: 0.35rem; font-weight: 600; color: var(--cr-ink); }
+.cmp3-table .chev { font-size: 0.8rem; margin-top: 0.2rem; }
+.min-w-0 { min-width: 0; }
+.amt-btn {
+  all: unset; cursor: pointer; font-variant-numeric: tabular-nums; border-bottom: 1px dashed color-mix(in srgb, var(--cr-primary) 55%, transparent);
+}
+.amt-btn:hover, .amt-btn.on { color: var(--cr-primary); border-bottom-style: solid; }
+.amt-btn:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 2px; border-radius: 2px; }
+.dept-pop {
+  position: fixed; z-index: 1080; background: #fff; border: 1px solid var(--cr-line); border-radius: 0.5rem;
+  box-shadow: 0 8px 24px rgba(15, 40, 40, 0.16); padding: 0.6rem 0.75rem; font-size: 0.85rem;
+}
+.dept-pop-head { font-weight: 600; margin-bottom: 0.35rem; display: flex; justify-content: space-between; gap: 0.5rem; }
+.dept-table td { background: transparent; padding: 0.25rem 0.35rem; border-color: var(--cr-line); vertical-align: top; }
+.dept-table td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dept-table tr.mine td { background: color-mix(in srgb, var(--cr-primary) 9%, #fff); font-weight: 600; }
+.dept-table tr.total td { font-weight: 600; border-bottom: 0; }
+.mine-tag { margin-left: 0.4rem; font-size: 0.7rem; font-weight: 600; color: #fff; background: var(--cr-primary); border-radius: 999px; padding: 0 0.45rem; }
+.detail-row > td { background: #f7faf9 !important; padding: 0.6rem 0.75rem 0.8rem; }
+.src-boxes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.6rem; }
+.src-box { background: #fff; border: 1px solid var(--cr-line); border-top: 3px solid var(--st-matched); border-radius: 0.5rem; padding: 0.5rem 0.7rem; min-width: 0; }
+.src-box.bad { border-top-color: var(--st-denied); }
+.src-box-head { display: flex; align-items: center; font-weight: 600; font-size: 0.88rem; margin-bottom: 0.35rem; }
+.src-box-head .ms-auto { color: var(--st-matched); }
+.src-box.bad .src-box-head .ms-auto { color: var(--st-denied); }
+.src-box .err-block { margin-top: 0.4rem; padding: 0.35rem 0.5rem; border-radius: 0.35rem; background: #fdf1f0; color: #7a1b12; white-space: normal; }
+/* จอแคบ: ตารางเลื่อนด้านข้างได้ แต่รายละเอียดที่ขยายตรึงไว้ในกรอบที่มองเห็น กล่องเรียงลงมา */
+.detail-row .row-detail { position: sticky; left: 0; width: min(100%, calc(100vw - 5.5rem)); }
+.src-box.na { border-top-color: var(--cr-line); }
+.row-detail, .dept-pop { white-space: normal; overflow-wrap: anywhere; }
+
+/* ---------- เทียบ 3 แหล่งแบบรวม: ป้ายทะเบียน / สถานะห้อง ---------- */
+.cmp-strip .warn { color: var(--st-diff); }
+.reg-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; max-width: 300px; }
+.reg-tag {
+  display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.78rem; line-height: 1.4; white-space: nowrap;
+  border: 1px solid var(--cr-line); border-radius: 0.35rem; padding: 0.05rem 0.4rem; background: #fff;
+}
+.reg-tag i { font-size: 0.8rem; }
+.reg-tag .amt { color: var(--cr-muted); font-variant-numeric: tabular-nums; }
+.reg-tag.ok i { color: var(--st-matched); }
+.reg-tag.bad { border-color: color-mix(in srgb, var(--st-denied) 35%, #fff); background: #fdf3f2; }
+.reg-tag.bad i { color: var(--st-denied); }
+.reg-tag.missing { border-style: dashed; border-color: color-mix(in srgb, var(--st-not-his) 45%, #fff); }
+.reg-tag.missing i { color: var(--st-not-his); }
+.reg-tag.unknown i { color: var(--st-multiple); }
+.reg-state { font-size: 0.72rem; white-space: nowrap; border-radius: 999px; padding: 0 0.45rem; }
+.reg-state.ok { color: var(--st-matched); background: color-mix(in srgb, var(--st-matched) 10%, #fff); }
+.reg-state.bad { color: var(--st-denied); background: color-mix(in srgb, var(--st-denied) 10%, #fff); }
+.reg-state.missing { color: var(--st-not-his); background: color-mix(in srgb, var(--st-not-his) 10%, #fff); }
+.reg-state.none { color: var(--cr-muted); }
+.dept-table .reg-cell { text-align: right; width: 1%; }
+.dept-table tr.has-reg td:first-child { font-weight: 600; }
+.reg-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-matched); flex: none; }
+.reg-dot.bad { background: var(--st-denied); }
+.reg-dot.missing { background: var(--st-not-his); }
+.reg-dot.unknown { background: var(--st-multiple); }
+.reg-entry + .reg-entry { border-top: 1px solid var(--cr-line); margin-top: 0.4rem; padding-top: 0.4rem; }
+.item-table td { background: transparent; padding: 0.15rem 0.3rem; border-color: var(--cr-line); }
+.item-table td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.upload-choice {
+  all: unset; box-sizing: border-box; display: flex; gap: 0.75rem; align-items: flex-start; cursor: pointer;
+  border: 1px solid var(--cr-line); border-radius: 0.5rem; padding: 0.7rem 0.9rem; background: #fff;
+}
+.upload-choice:hover { border-color: var(--cr-primary); background: #f3f8f7; }
+.upload-choice:focus-visible { outline: 2px solid var(--cr-accent); outline-offset: 2px; }
+.upload-choice > i { font-size: 1.4rem; color: var(--cr-primary); line-height: 1.2; }
+.upload-choice .title { display: block; font-weight: 600; }
+.upload-choice .desc { display: block; font-size: 0.82rem; color: var(--cr-muted); }
+.item-table th { background: transparent; font-size: 0.72rem; font-weight: 400; color: var(--cr-muted); padding: 0.1rem 0.3rem; }
+.item-table th.num { text-align: right; }
+@media (max-width: 576px) {
+  .dept-table .reg-state { white-space: normal; display: inline-block; text-align: center; line-height: 1.25; }
+}
+.dept-table tr.room-head td { font-weight: 600; background: color-mix(in srgb, var(--cr-primary) 6%, #fff); }
+.dept-table tr.room-head .small-id { font-weight: 400; }
+.dept-table tr.room-dep td:first-child { padding-left: 1.1rem; color: var(--cr-muted); }
+.dept-table td { white-space: normal; overflow-wrap: break-word; }
+.dept-table td.num, .dept-table .reg-state { white-space: nowrap; }
+@media (min-width: 992px) {
+  .src-boxes { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr); }
+}
+.entry-issue { margin-top: 0.35rem; padding: 0.3rem 0.5rem; border-radius: 0.35rem; background: #fdf1f0; color: #7a1b12; font-size: 0.8rem; }
+.item-table td { white-space: normal; }
+.item-table .wrap-note { white-space: normal; display: inline-block; min-width: 4.5em; text-align: right; }

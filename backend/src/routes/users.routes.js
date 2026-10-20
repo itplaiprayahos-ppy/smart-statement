@@ -9,7 +9,7 @@ const router = Router();
 router.use(requireRole('admin'));
 
 const ROLES = ['admin', 'user', 'executive'];
-const COLUMNS = 'id, username, full_name, role, is_active, fund_codes, last_login_at, created_at';
+const COLUMNS = 'id, username, full_name, role, is_active, fund_codes, point_codes, last_login_at, created_at';
 
 function readFundCodes(v) {
   if (v === undefined) return null;
@@ -52,7 +52,7 @@ router.post('/', asyncHandler(async (req, res) => {
 
 router.put('/:id', asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
-  const { full_name, role, is_active, fund_codes } = req.body || {};
+  const { full_name, role, is_active, fund_codes, point_codes } = req.body || {};
   if (role !== undefined && !ROLES.includes(role)) throw new HttpError(400, 'role ไม่ถูกต้อง');
   if (id === req.user.id && ((role && role !== 'admin') || is_active === false)) {
     throw new HttpError(400, 'ไม่สามารถลดสิทธิ์หรือปิดบัญชีของตัวเองได้');
@@ -64,9 +64,10 @@ router.put('/:id', asyncHandler(async (req, res) => {
        role      = COALESCE($3, role),
        is_active = COALESCE($4, is_active),
        fund_codes = COALESCE($5::jsonb, fund_codes),
+       point_codes = COALESCE($6::jsonb, point_codes),
        updated_at = now()
      WHERE id = $1 RETURNING ${COLUMNS}`,
-    [id, full_name ?? null, role ?? null, typeof is_active === 'boolean' ? is_active : null, readFundCodes(fund_codes)],
+    [id, full_name ?? null, role ?? null, typeof is_active === 'boolean' ? is_active : null, readFundCodes(fund_codes), readFundCodes(point_codes)],
   );
   if (!rows[0]) throw new HttpError(404, 'ไม่พบผู้ใช้');
   await audit(req, 'user_update', { id, role, is_active });

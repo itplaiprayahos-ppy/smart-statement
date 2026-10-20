@@ -21,6 +21,12 @@ export function splitCodes(value) {
   return [...new Set(out)];
 }
 
+/** รหัสติด C สำหรับแสดงผล เช่น "C438, C301" (ไม่มีรหัส = null) */
+export function formatCodes(value) {
+  const codes = splitCodes(value).map((c) => (/^\d/.test(c) ? `C${c}` : c));
+  return codes.length ? codes.join(', ') : null;
+}
+
 // ---------- cache ในหน่วยความจำ (ตารางเล็ก อ่านบ่อย) ----------
 let cache = null;
 export async function errorCodeMap() {

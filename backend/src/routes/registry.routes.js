@@ -7,6 +7,7 @@ import { parseRegistry } from '../services/registryParser.js';
 import {
   compareRegistry, COMPARE_STATUSES, exportCompare, importRegistry, previewRegistry, registryTemplate, saveAlias, unknownItems,
 } from '../services/registryService.js';
+import { compareAll, exportAll, listUploads, THREE_WAY_STATUSES } from '../services/threeWayService.js';
 import { readDateRange } from './his.routes.js';
 import { readSort } from '../utils/sort.js';
 
@@ -44,6 +45,7 @@ router.post('/preview', upload.single('file'), asyncHandler(async (req, res) => 
     missingRequired: parsed.missingRequired,
     totalRows: parsed.totalRows,
     validRows: records.length,
+    visitLevelRows: parsed.visitLevelRows,
     errorCount: parsed.errorCount,
     errors: parsed.errors.slice(0, 50),
     dateFrom: parsed.dateFrom,
@@ -131,5 +133,30 @@ router.get('/compare/export', asyncHandler(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="compare_${fund.code}_${opts.dateFrom}_${opts.dateTo}.xlsx"`);
   res.send(buffer);
 }));
+
+/* ---------- เทียบ 3 แหล่งแบบรวม (ทุกห้อง/แผนก และทุกกองทุนในหน้าเดียว) ---------- */
+function readAll(q) {
+  const range = readDateRange(q);
+  if (q.status && !THREE_WAY_STATUSES[q.status]) throw new HttpError(400, 'สถานะไม่ถูกต้อง');
+  return { ...range, status: q.status || null, search: q.search, page: q.page, pageSize: q.pageSize, ...readSort(q) };
+}
+
+router.get('/all', asyncHandler(async (req, res) => {
+  const opts = readAll(req.query);
+  const data = await compareAll(opts);
+  await audit(req, 'registry_compare_all', { dateFrom: opts.dateFrom, dateTo: opts.dateTo });
+  res.json(data);
+}));
+
+router.get('/all/export', asyncHandler(async (req, res) => {
+  const opts = readAll(req.query);
+  const { buffer, count } = await exportAll(opts);
+  await audit(req, 'registry_export_all', { rows: count });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="compare_3way_${opts.dateFrom}_${opts.dateTo}.xlsx"`);
+  res.send(buffer);
+}));
+
+router.get('/uploads', asyncHandler(async (_req, res) => res.json(await listUploads())));
 
 export default router;
