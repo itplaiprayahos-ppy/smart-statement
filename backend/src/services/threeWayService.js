@@ -13,7 +13,6 @@ import { sortRows } from '../utils/sort.js';
  *  HOSxP   : ยอดทั้ง visit แยกตามห้องที่บันทึก (dep_code)
  *  REP     : เรียกเก็บ / ได้รับ / ติด C ของ visit นั้น
  * ===================================================================== */
-const TOLERANCE = 1;
 
 /** ผลการเทียบ เรียงจากเรื่องที่ต้องแก้ก่อน */
 export const THREE_WAY_STATUSES = {
@@ -21,9 +20,11 @@ export const THREE_WAY_STATUSES = {
   UNKNOWN_ITEM:    { label: 'ต้องจับคู่ชื่อรายการ' },
   HIS_DIFF:        { label: 'ทะเบียนไม่ตรงกับ HOSxP' },
   NOT_IN_REGISTRY: { label: 'ไม่อยู่ในทะเบียน' },
-  DENIED:          { label: 'ติด C' },
+  // ฝั่ง REP ใช้ผลและชื่อเดียวกับหน้ากระทบยอด OPD (เรียกเก็บ (HOSxP) = uc_money เทียบ เรียกเก็บ (REP))
+  DENIED:          { label: 'ถูกปฏิเสธ / ติด C' },
   NOT_IN_REP:      { label: 'ยังไม่พบใน REP' },
-  REP_DIFF:        { label: 'REP ไม่ตรงกับ HOSxP' },
+  REP_DIFF:        { label: 'ยอดต่าง (HOSxP–REP)' },
+  NOT_PAID:        { label: 'ไม่ได้รับเงินกองทุน' },
   MATCH:           { label: 'ตรงกันครบ 3 แหล่ง' },
 };
 const ORDER = Object.keys(THREE_WAY_STATUSES);
@@ -36,7 +37,7 @@ const shortName = (name) => String(name || '').replace(/^[\d.\-\s]+/, '') || Str
 const FUND_MAP = {
   MATCH: 'MATCH', UNKNOWN_ITEM: 'UNKNOWN_ITEM', NO_VISIT: 'NO_VISIT',
   NOT_CHARGED: 'HIS_DIFF', PRICE_DIFF: 'HIS_DIFF', NOT_ELIGIBLE: 'HIS_DIFF',
-  DENIED: 'DENIED', NOT_CLAIMED: 'NOT_IN_REP', NOT_PAID: 'REP_DIFF', NOT_IN_REGISTRY: 'NOT_IN_REGISTRY',
+  DENIED: 'DENIED', NOT_CLAIMED: 'NOT_IN_REP', NOT_PAID: 'NOT_PAID', NOT_IN_REGISTRY: 'NOT_IN_REGISTRY',
 };
 // สถานะฝั่งทะเบียน-HOSxP (ใช้ทำป้ายในคอลัมน์ทะเบียน) สถานะฝั่ง REP ถือว่าทะเบียนปกติ
 const REG_SIDE = ['NO_VISIT', 'UNKNOWN_ITEM', 'HIS_DIFF', 'NOT_IN_REGISTRY'];
@@ -75,10 +76,10 @@ async function fundEntries(range) {
 async function visitData(vns, range) {
   if (!vns.length) return { visits: new Map(), deps: new Map(), reps: new Map() };
   const [{ rows: visits }, { rows: deps }, { rows: reps }] = await Promise.all([
-    db.query('SELECT vn, hn, cid, ptname, vstdate::text AS vstdate, pttype_name FROM his_opd_visits WHERE vn = ANY($1)', [vns]),
+    db.query('SELECT vn, hn, cid, ptname, vstdate::text AS vstdate, pttype_name, uc_money FROM his_opd_visits WHERE vn = ANY($1)', [vns]),
     db.query(`SELECT vn, dep_code, SUM(amount) AS amount, SUM(optional_amount) AS optional_amount FROM his_opd_dep
               WHERE vn = ANY($1) GROUP BY vn, dep_code ORDER BY vn, SUM(amount) DESC`, [vns]),
-    db.query(`${baseCte('claim')} SELECT vn, line_id, claim_amount, compensated, error_code, tran_id, rep_no, status
+    db.query(`${baseCte('claim')} SELECT vn, line_id, claim_amount, compensated, error_code, tran_id, rep_no, status, uc_money, grp_n
               FROM r WHERE vn = ANY($5)`, [...baseParams({ ...range, fund: null, onlyClaimable: false }), vns]),
   ]);
   const depMap = new Map();
@@ -161,18 +162,25 @@ async function buildRows(range) {
       };
     });
 
-    // REP ระดับ visit
+    // REP ระดับ visit: เกณฑ์เดียวกับหน้ากระทบยอด OPD (ผลจับคู่ status จาก baseCte)
+    //   DENIED = ติด C / NOT_IN_STM = ยังไม่พบใน REP / เรียกเก็บ (REP) ต่างจาก เรียกเก็บ (HOSxP) = ยอดต่าง
     const err = rep ? formatCodes(rep.error_code) : null;
+    const ucMoney = v ? Number(rep?.uc_money ?? v.uc_money ?? 0) : null;
     let repStatus = null;
     let repIssue = null;
     if (g.vn) {
-      if (rep?.line_id && (err || rep.status === 'DENIED')) {
+      if (rep?.status === 'DENIED') {
         repStatus = 'DENIED';
         repIssue = `ติด ${err || 'C'}${rep.error_detail ? `: ${rep.error_detail.split('\n')[0].replace(/^\w+: /, '')}` : ''}`;
       } else if (!rep?.line_id) {
         repStatus = 'NOT_IN_REP'; repIssue = 'ยังไม่พบใน REP';
-      } else if (Math.abs(Number(rep.claim_amount || 0) - vnTotal) > TOLERANCE) {
-        repStatus = 'REP_DIFF'; repIssue = `HOSxP ทั้ง visit ${money(vnTotal)} แต่ REP เรียกเก็บ ${money(rep.claim_amount || 0)}`;
+      } else if (Math.abs(Number(rep.claim_amount || 0) - ucMoney) >= 0.01) {
+        repStatus = 'REP_DIFF';
+        repIssue = `เรียกเก็บ (HOSxP) ${money(ucMoney)} แต่เรียกเก็บ (REP) ${money(rep.claim_amount || 0)}`;
+      }
+      if (rep?.grp_n > 1) {
+        const note = 'คนไข้มาหลายครั้งในวันเดียว ระบบจับคู่ REP ตามลำดับยอดเงิน ควรตรวจ';
+        repIssue = repIssue ? `${repIssue} (${note})` : null;
       }
     }
 
@@ -187,6 +195,7 @@ async function buildRows(range) {
       registries,
       vn_total: g.vn ? vnTotal : null,
       breakdown: roomsOf(breakdown, registries, { depOwner, depName, pointName }),
+      uc_money: ucMoney,
       rep: rep?.line_id ? {
         claim_amount: rep.claim_amount, compensated: rep.compensated, tran_id: rep.tran_id, rep_no: rep.rep_no,
         error_code: err, error_detail: err ? rep.error_detail : null, error_guidance: err ? rep.error_guidance : null,
@@ -246,6 +255,7 @@ export async function compareAll({ dateFrom, dateTo, status, search, page = 1, p
   const totals = {
     visits: all.length,
     his: all.reduce((a, r) => a + Number(r.vn_total || 0), 0),
+    hisClaim: all.reduce((a, r) => a + Number(r.uc_money || 0), 0),
     repClaim: all.reduce((a, r) => a + Number(r.rep?.claim_amount || 0), 0),
     repPaid: all.reduce((a, r) => a + Number(r.rep?.compensated || 0), 0),
   };
@@ -288,6 +298,7 @@ export async function exportAll(opts) {
     'VN': r.vn,
     'ทะเบียน': r.registries.map((t) => `${t.full}${t.amount !== null ? ` ${money(t.amount)}` : ''}${t.inRegistry ? '' : ' (ไม่อยู่ในทะเบียน)'}`).join(', '),
     'HOSxP ทั้ง visit': r.vn_total,
+    'เรียกเก็บ (HOSxP)': r.uc_money,
     'HOSxP แยกตามห้อง': r.breakdown.flatMap((g) => g.deps).map((b) => `${b.name || `แผนก ${b.dep}`}: ${money(b.amount)}`).join(', '),
     'เรียกเก็บ (REP)': r.rep ? Number(r.rep.claim_amount || 0) : null,
     'ได้รับ (REP)': r.rep ? Number(r.rep.compensated || 0) : null,
@@ -296,7 +307,7 @@ export async function exportAll(opts) {
     'ผลการแก้ไข / หมายเหตุ': '',
   }));
   const ws = XLSX.utils.json_to_sheet(data.length ? data : [{ 'ผลการเทียบ': 'ไม่มีข้อมูล' }]);
-  ws['!cols'] = [22, 60, 12, 11, 15, 22, 14, 40, 14, 50, 14, 14, 14, 12, 28].map((w) => ({ wch: w }));
+  ws['!cols'] = [22, 60, 12, 11, 15, 22, 14, 40, 14, 14, 50, 14, 14, 14, 12, 28].map((w) => ({ wch: w }));
   ws['!autofilter'] = { ref: ws['!ref'] };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'เทียบ 3 แหล่ง');

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Link } from 'react-router-dom';
 import api from '../api/client.js';
 import Pagination from '../components/Pagination.jsx';
 import PeriodFields from '../components/PeriodFields.jsx';
@@ -25,6 +26,7 @@ const STATUS_STYLE = {
   DENIED:          { color: 'var(--st-denied)',  icon: 'bi-x-octagon' },
   NOT_IN_REP:      { color: 'var(--st-diff)',    icon: 'bi-send-exclamation' },
   REP_DIFF:        { color: 'var(--st-diff)',    icon: 'bi-currency-exchange' },
+  NOT_PAID:        { color: 'var(--st-diff)',    icon: 'bi-cash' },
   MATCH:           { color: 'var(--st-matched)', icon: 'bi-check-circle' },
 };
 /** สถานะของแต่ละทะเบียนเทียบกับ HOSxP */
@@ -241,14 +243,15 @@ function RowDetail({ r }) {
         </Box>
         <Box title="REP (e-Claim)" icon="bi-cloud-check" bad={r.vn ? !!r.rep_status : null}>
           {r.rep && <BoxReason items={r.issues.filter((x) => x.startsWith('REP: ')).map((x) => x.slice(5))} />}
+          {r.vn && <div className="small"><Field label="เรียกเก็บ (HOSxP)">{money(r.uc_money)}</Field></div>}
           {!r.vn ? <p className="small muted mb-0">เทียบไม่ได้ เพราะไม่พบ visit</p>
             : !r.rep ? (
               <p className="small mb-0">ยังไม่พบใน REP<span className="d-block muted">ยังไม่ได้ส่งเบิก รอผลรอบถัดไป หรือยังไม่ได้นำเข้าไฟล์ REP ที่มีรายการนี้</span></p>
             ) : (
               <div className="small">
-                {r.rep.tran_id && <Field label="TRAN_ID">{r.rep.tran_id}</Field>}
                 <Field label="เรียกเก็บ (REP)">{money(r.rep.claim_amount)}</Field>
                 <Field label="ได้รับ (REP)">{money(r.rep.compensated)}</Field>
+                {r.rep.tran_id && <Field label="TRAN_ID">{r.rep.tran_id}</Field>}
                 {r.rep.error_code && (
                   <div className="err-block">
                     <div className="fw-semibold">ติด {r.rep.error_code}</div>
@@ -262,6 +265,11 @@ function RowDetail({ r }) {
                 )}
               </div>
             )}
+          {r.vn && (
+            <Link className="small d-inline-block mt-2" to={`/recon/opd?${new URLSearchParams({ q: r.vn, dateFrom: r.sdate, dateTo: r.sdate })}`}>
+              <i className="bi bi-box-arrow-up-right me-1" />ดูในกระทบยอด OPD
+            </Link>
+          )}
         </Box>
       </div>
       {r.status === 'MATCH' ? (
@@ -403,7 +411,7 @@ export default function RegistryPage() {
       <div className="page-head">
         <div>
           <h1>เทียบ 3 แหล่ง</h1>
-          <p>ทะเบียนทุกห้อง/แผนกและกองทุน เทียบกับ HOSxP และ REP ทีละ visit ชี้ที่ยอด HOSxP เพื่อดูว่าค่าใช้จ่ายมาจากห้องไหน</p>
+          <p>งานหน้างาน: ทะเบียนทุกห้อง/แผนกและกองทุน ลงใน HOSxP ครบและตรงไหม และ visit นั้นเบิกได้หรือยัง (ผลฝั่ง REP ใช้เกณฑ์เดียวกับเมนู “กระทบยอด OPD”) ชี้ที่ยอด HOSxP เพื่อดูว่าค่าใช้จ่ายมาจากห้องไหน</p>
         </div>
         <button type="button" className="btn btn-primary" onClick={() => setModal('choose')}>
           <i className="bi bi-upload me-1" />อัปโหลดทะเบียน
@@ -464,7 +472,7 @@ export default function RegistryPage() {
             <span className="item"><span className="lbl"><i className="bi bi-people" />visit ที่มีทะเบียน</span><strong>{int(t.visits)}</strong></span>
             <span className="item"><span className="lbl"><i className="bi bi-check-circle" />ตรงกันครบ</span><strong className="paid">{int(data.summary.MATCH)}</strong></span>
             <span className="item"><span className="lbl"><i className="bi bi-exclamation-circle" />ต้องตรวจ</span><strong className="warn">{int(needFix)}</strong></span>
-            <span className="item"><span className="lbl"><i className="bi bi-hospital" />HOSxP</span><strong>{money(t.his)}</strong></span>
+            <span className="item" title={`ค่าใช้จ่ายทั้ง visit ${money(t.his)} บาท`}><span className="lbl"><i className="bi bi-hospital" />เรียกเก็บ (HOSxP)</span><strong>{money(t.hisClaim)}</strong></span>
             <span className="item"><span className="lbl"><i className="bi bi-cloud-check" />REP เรียกเก็บ / ได้รับ</span>
               <strong>{money(t.repClaim)}</strong><span className="sep">/</span><strong className="paid">{money(t.repPaid)}</strong></span>
           </div>
@@ -494,7 +502,7 @@ export default function RegistryPage() {
                   <SortTh k="sdate" sort={sort} onSort={onSort}>วันที่</SortTh>
                   <SortTh k="hn" sort={sort} onSort={onSort}>คนไข้</SortTh>
                   <SortTh k="registry" sort={sort} onSort={onSort}>ทะเบียน</SortTh>
-                  <SortTh k="his" sort={sort} onSort={onSort} className="num" title="ยอดทั้ง visit ชี้หรือกดที่ยอดเพื่อดูแยกตามห้อง">HOSxP</SortTh>
+                  <SortTh k="his" sort={sort} onSort={onSort} className="num" title="ค่าใช้จ่ายทั้ง visit ชี้หรือกดที่ยอดเพื่อดูแยกตามห้อง ตัวเล็กคือเรียกเก็บ (HOSxP) ที่ใช้เทียบกับ REP">HOSxP</SortTh>
                   <SortTh k="rep" sort={sort} onSort={onSort} className="num" title="เรียกเก็บ (REP) ตัวเล็กคือได้รับ (REP)">REP</SortTh>
                   <SortTh k="status" sort={sort} onSort={onSort}>ผลการเทียบ</SortTh>
                 </tr>
@@ -522,6 +530,9 @@ export default function RegistryPage() {
                               onClick={(e) => togglePop(e, r.key, r)}>
                               {money(r.vn_total)}
                             </button>
+                          )}
+                          {r.vn && Math.abs(Number(r.uc_money) - Number(r.vn_total)) >= 0.01 && (
+                            <div className="small-id" title="เรียกเก็บ (HOSxP) ที่ใช้เทียบกับ REP">เรียกเก็บ {money(r.uc_money)}</div>
                           )}
                           {r.vn && r.breakdown.length > 1 && <div className="small-id">{r.breakdown.length} ห้อง</div>}
                         </td>

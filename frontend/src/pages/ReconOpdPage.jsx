@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client.js';
 import Pagination from '../components/Pagination.jsx';
 import StatusBadge from '../components/StatusBadge.jsx';
@@ -16,12 +17,22 @@ import {
 const PAGE_SIZE = 50;
 
 export default function ReconOpdPage() {
-  const [filters, setFilters] = useState({
-    ...lastMonthRange(), fund: 'UCS', compare: 'claim', onlyClaimable: true,
+  // ลิงก์จากหน้าอื่น (เช่น เทียบ 3 แหล่ง) ส่ง ?q=HN&dateFrom=&dateTo= มา: ค้นหาทุกกองทุน รวม visit ที่ยอดเป็น 0
+  const [urlParams] = useSearchParams();
+  const linkQ = urlParams.get('q') || '';
+  const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+  const [filters, setFilters] = useState(() => {
+    const base = { ...lastMonthRange(), fund: 'UCS', compare: 'claim', onlyClaimable: true };
+    if (!linkQ) return base;
+    return {
+      ...base, fund: '', onlyClaimable: false,
+      dateFrom: isDate(urlParams.get('dateFrom')) ? urlParams.get('dateFrom') : base.dateFrom,
+      dateTo: isDate(urlParams.get('dateTo')) ? urlParams.get('dateTo') : base.dateTo,
+    };
   });
   const [status, setStatus] = useState('');
-  const [search, setSearch] = useState('');
-  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState(linkQ);
+  const [searchInput, setSearchInput] = useState(linkQ);
   const [page, setPage] = useState(1);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -121,7 +132,7 @@ export default function ReconOpdPage() {
       <div className="page-head">
         <div>
           <h1>กระทบยอด OPD</h1>
-          <p>จับคู่ visit ใน HOSxP กับรายการจาก สปสช. ด้วยเลขบัตรประชาชนและวันที่รับบริการ</p>
+          <p>งานเคลม: ทุก visit ใน HOSxP เทียบกับ REP ส่งเบิกครบไหม ได้รับเงินไหม ติด C อะไร (เทียบ เรียกเก็บ (HOSxP) กับ เรียกเก็บ (REP)) ถ้าจะตรวจว่าทะเบียนหน้างานลงใน HOSxP ครบไหม ใช้เมนู “เทียบ 3 แหล่ง”</p>
         </div>
         <div className="d-flex gap-2">
           <button type="button" className="btn btn-outline-primary" onClick={pullHosxp} disabled={!!rangeError}>
