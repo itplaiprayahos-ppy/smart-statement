@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { db } from '../config/db.js';
+import { env } from '../config/env.js';
 import { baseParams } from './reconService.js';
 import { fundCte } from './fundService.js';
 import { annotateErrors, formatCodes } from './errorCodeService.js';
@@ -34,6 +35,72 @@ const ELIGIBLE = ['PAID', 'NOT_PAID', 'DENIED', 'NOT_SENT'];
 const money = (v) => Number(v || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const num = (v) => Number(v || 0);
 const personKey = (r) => r.cid || (r.hn ? `HN:${String(r.hn).replace(/^0+/, '')}` : r.key);
+
+/* ---------- เหตุผลที่ visit ไม่เข้าเกณฑ์กองทุน (กรณี REP จ่ายกองทุนนั้น) ----------
+ * ตรวจตามเงื่อนไขเดียวกับ fundCte ทีละข้อ แล้วบอกข้อที่ไม่ผ่าน เช่น สิทธิไม่ได้เลือกไว้ / เรียกเก็บเป็น 0 */
+const icdNorm = (v) => String(v || '').toUpperCase().replace(/\./g, '');
+function icdHit(code, list) {
+  const c = icdNorm(code);
+  if (!c) return false;
+  return list.some((x) => {
+    const v = String(x);
+    if (v.includes('-')) {
+      const [a, b] = v.split('-');
+      return c.slice(0, a.length) >= a && c.slice(0, b.length) <= b;
+    }
+    return c.startsWith(v);
+  });
+}
+
+async function explainExtra(extra) {
+  const out = new Map();
+  if (!extra.length) return out;
+  const vns = [...new Set(extra.map((b) => b.vn))];
+  const codes = [...new Set(extra.map((b) => b.fund_code))];
+  const [{ rows: funds }, { rows: fitems }, { rows: visits }, { rows: dx }, { rows: items }] = await Promise.all([
+    db.query(`SELECT code, match_mode, pttypes, hipdata_codes, icd10_codes, icd10_scope FROM funds WHERE code = ANY($1)`, [codes]),
+    db.query('SELECT fund_code, icode FROM fund_items WHERE fund_code = ANY($1)', [codes]),
+    db.query('SELECT vn, pttype, pttype_name, hipdata_code, pdx, uc_money FROM his_opd_visits WHERE vn = ANY($1)', [vns]),
+    db.query('SELECT vn, icd10 FROM his_opd_dx WHERE vn = ANY($1)', [vns]),
+    db.query('SELECT DISTINCT vn, icode FROM his_opd_items WHERE vn = ANY($1)', [vns]),
+  ]);
+  const fundMap = new Map(funds.map((f) => [f.code, f]));
+  const fundIcodes = new Map();
+  fitems.forEach((i) => (fundIcodes.get(i.fund_code) || fundIcodes.set(i.fund_code, new Set()).get(i.fund_code)).add(String(i.icode)));
+  const visit = new Map(visits.map((v) => [v.vn, v]));
+  const dxOf = new Map();
+  dx.forEach((d) => (dxOf.get(d.vn) || dxOf.set(d.vn, []).get(d.vn)).push(d.icd10));
+  const itemsOf = new Map();
+  items.forEach((i) => (itemsOf.get(i.vn) || itemsOf.set(i.vn, new Set()).get(i.vn)).add(String(i.icode)));
+
+  extra.forEach((b) => {
+    const f = fundMap.get(b.fund_code);
+    const v = visit.get(b.vn);
+    if (!f || !v) return;
+    const why = [];
+    const hip = v.hipdata_code || '';
+    const pttypes = f.pttypes || [];
+    const hips = f.hipdata_codes || [];
+    const icds = f.icd10_codes || [];
+    if (env.excludedHipdata.includes(hip.toUpperCase())) why.push(`สิทธิกลุ่ม ${hip} ไม่นับเข้ากองทุนใด (EXCLUDED_HIPDATA)`);
+    if (pttypes.length && !pttypes.includes(v.pttype)) why.push(`สิทธิ ${v.pttype || '-'} ${v.pttype_name || ''} ไม่ได้เลือกไว้ในกองทุน ${f.code}`.replace(/\s+/g, ' '));
+    else if (!pttypes.length && hips.length && !hips.includes(hip)) why.push(`กลุ่มสิทธิ ${hip || '-'} (${v.pttype_name || ''}) ไม่อยู่ในเงื่อนไขกองทุน ${f.code}`);
+    if (icds.length) {
+      const ok = f.icd10_scope === 'pdx' ? icdHit(v.pdx, icds) : (dxOf.get(b.vn) || [v.pdx]).some((c) => icdHit(c, icds));
+      if (!ok) why.push(`รหัสโรค ${v.pdx || '(ไม่มี PDX)'} ไม่ตรงเงื่อนไข ICD-10 ของกองทุน`);
+    }
+    if (f.match_mode === 'items') {
+      const set = fundIcodes.get(f.code);
+      if (!set?.size) why.push(`กองทุน ${f.code} ยังไม่ได้ตั้งรายการค่าบริการ`);
+      else if (![...(itemsOf.get(b.vn) || [])].some((i) => set.has(i))) why.push(`visit ไม่มีรายการค่าบริการ/ยาที่ตั้งไว้ในกองทุน ${f.code}`);
+    } else {
+      if (f.match_mode === 'icd' && !icds.length) why.push(`กองทุน ${f.code} คัดตาม ICD-10 แต่ยังไม่ได้ใส่รหัสโรค`);
+      if (num(v.uc_money) <= 0) why.push('เรียกเก็บ (HOSxP) เป็น 0 บาท (ตรวจ paidst ของรายการ หรือดึงข้อมูล HOSxP ใหม่)');
+    }
+    out.set(`${b.vn}|${b.fund_code}`, why.length ? why.join(' · ') : 'ไม่ตรงเงื่อนไขกองทุน (ตรวจการตั้งค่ากองทุน)');
+  });
+  return out;
+}
 
 /** ข้อมูลดิบทั้งหมดของช่วงวันที่ (ไม่ขึ้นกับตัวกรองอื่น) */
 async function loadAll(range) {
@@ -81,12 +148,13 @@ async function loadAll(range) {
     const k = b.vn || `L${b.line_id}`;
     (groups.get(k) || groups.set(k, []).get(k)).push(b);
   });
+  const reasons = await explainExtra(base.filter((b) => b.fund_status === 'EXTRA_PAID' && b.vn));
   const rows = [];
   groups.forEach((list) => {
     const main = list.filter((b) => b.fund_status !== 'RECEIVED');
     const tracked = list.filter((b) => b.fund_status === 'RECEIVED');
     if (!main.length) main.push({ ...list[0], fund_code: null, fund_name: null, fund_status: null, stm_fund_amount: null, his_fund_amount: null });
-    main.forEach((b) => rows.push(buildRow(b, { depMap, regByVn, maps })));
+    main.forEach((b) => rows.push(buildRow(b, { depMap, regByVn, maps, reasons })));
     tracked.forEach((b) => rows.push({ ...buildRow(b, { depMap, regByVn, maps }), tracked: true }));
   });
   regNoVisit.forEach((list, key) => {
@@ -104,7 +172,7 @@ async function loadAll(range) {
   return { rows, depMap, maps };
 }
 
-function buildRow(b, { depMap, regByVn, maps }) {
+function buildRow(b, { depMap, regByVn, maps, reasons }) {
   const deps = b.vn ? depMap.get(b.vn) || [] : [];
   const depAmounts = {};
   deps.forEach((d) => {
@@ -133,7 +201,7 @@ function buildRow(b, { depMap, regByVn, maps }) {
   return finish({
     key: `${b.vn || `L${b.line_id}`}:${b.fund_code || NO_FUND}`,
     vn: b.vn, sdate: b.sdate, hn: b.hn, cid: b.cid, patient_name: b.patient_name, pttype_name: b.pttype_name,
-    fund: b.fund_code ? { code: b.fund_code, name: b.fund_name, status: fs } : null,
+    fund: b.fund_code ? { code: b.fund_code, name: b.fund_name, status: fs, reason: reasons?.get(`${b.vn}|${b.fund_code}`) || null } : null,
     eligible, sent, paid, served: !!b.vn,
     his_total: b.vn ? (deps.length ? deps.reduce((a, d) => a + d.amount, 0) : num(b.income)) : null,
     uc_money: ucMoney,
@@ -176,7 +244,7 @@ function finish(r) {
         : `${t.name}: ${t.issues[0] || t.label}`;
       break;
     }
-    case 'EXTRA': text = `REP จ่ายกองทุน ${fundName} แต่ visit ไม่เข้าเกณฑ์: ตรวจการตั้งค่ากองทุน หรือยอดเรียกเก็บใน HOSxP`; break;
+    case 'EXTRA': text = `REP จ่ายกองทุน ${fundName} แต่ visit ไม่เข้าเกณฑ์: ${r.fund?.reason || 'ตรวจการตั้งค่ากองทุน หรือยอดเรียกเก็บใน HOSxP'}`; break;
     default:
       text = r.fund?.status === 'RECEIVED' ? `ได้รับเงินกองทุน ${fundName} (ติดตามยอดรับ)` : r.paid ? 'ได้รับเงินแล้ว' : !r.fund ? (r.sent ? 'ส่งเบิกแล้ว (ไม่เข้าเกณฑ์กองทุนที่ตั้งค่า)' : 'ไม่เข้าเกณฑ์กองทุนที่ตั้งค่า') : '–';
   }
@@ -189,12 +257,12 @@ function finish(r) {
 }
 
 /* ---------- ตัวกรอง ---------- */
-function scope(rows, { point, fund, search }) {
+function scope(rows, { point, fund, search }, includeTracked = false) {
   const pts = point?.length ? new Set(point) : null;
   const fds = fund?.length ? new Set(fund) : null;
   const q = search?.trim().toLowerCase();
   return rows.filter((r) => (!pts || r.rooms.some((c) => pts.has(c)))
-    && (fds ? fds.has(r.fund?.code || NO_FUND) : !r.tracked)
+    && (fds ? fds.has(r.fund?.code || NO_FUND) : includeTracked || !r.tracked)
     && (!q || [r.hn, r.cid, r.vn, r.patient_name, r.pttype_name, r.rep?.tran_id, r.rep?.rep_no, r.fund?.code, r.fund?.name]
       .some((v) => v && String(v).toLowerCase().includes(q))));
 }
@@ -229,10 +297,10 @@ function funnel(rows, pts) {
   const paid = rows.filter(STEP_OK[4]);
   return {
     served: stepStat(served, (x) => visitSum(x, (r) => costOf(r, pts))),
-    eligible: stepStat(elig, (x) => visitSum(x, (r) => r.uc_money)),
+    eligible: stepStat(elig, (x) => x.reduce((a, r) => a + num(r.his_fund_amount), 0)),
     sent: stepStat(sent, (x) => visitSum(x, (r) => r.rep?.claim_amount)),
     paid: stepStat(paid, (x) => x.reduce((a, r) => a + num(r.fund_paid), 0)),
-    notSent: stepStat(elig.filter((r) => !r.sent), (x) => visitSum(x, (r) => r.uc_money)),
+    notSent: stepStat(elig.filter((r) => !r.sent), (x) => x.reduce((a, r) => a + num(r.his_fund_amount), 0)),
     notPaid: stepStat(sent.filter((r) => !r.paid), (x) => visitSum(x, (r) => r.rep?.claim_amount)),
   };
 }
@@ -285,9 +353,11 @@ async function loadCached(range) {
 
 function applyFilters(all, opts) {
   const scoped = scope(all, opts);
-  const filtered = scoped.filter((r) => (!opts.step || STEP_OK[opts.step]?.(r))
-    && (!opts.problem || r.problems.includes(opts.problem)));
-  return { scoped, filtered };
+  const pass = (r) => (!opts.step || STEP_OK[opts.step]?.(r)) && (!opts.problem || r.problems.includes(opts.problem));
+  const filtered = scoped.filter(pass);
+  // ได้รับ (กองทุน) นับรวมกองทุนติดตามยอดรับด้วย (ตรงกับหน้าภาพรวม)
+  const withTracked = scope(all, opts, true).filter(pass);
+  return { scoped, filtered, withTracked };
 }
 
 /** เติมรายละเอียดเฉพาะแถวที่แสดง: แยกห้อง และคำอธิบายรหัสข้อผิดพลาด */
@@ -309,7 +379,7 @@ async function enrich(rows, { depMap, maps }) {
 export async function listPatients(opts) {
   const { rows: all, depMap, maps } = await loadCached(opts);
   const pts = opts.point?.length ? opts.point : null;
-  const { scoped, filtered } = applyFilters(all, opts);
+  const { scoped, filtered, withTracked } = applyFilters(all, opts);
   const sorted = sortRows(filtered, SORT, opts);
   const size = Math.min(Math.max(Number(opts.pageSize) || 50, 10), 500);
   const page = Math.max(Number(opts.page) || 1, 1);
@@ -333,6 +403,9 @@ export async function listPatients(opts) {
       hisClaim: visitSum(filtered.filter((r) => r.served), (r) => r.uc_money),
       repClaim: visitSum(filtered.filter((r) => r.sent), (r) => r.rep?.claim_amount),
       repPaid: visitSum(filtered.filter((r) => r.sent), (r) => r.rep?.compensated),
+      // ระดับกองทุน (ตรงกับหน้าภาพรวม)
+      fundClaim: filtered.filter((r) => r.eligible).reduce((a, r) => a + num(r.his_fund_amount), 0),
+      fundPaid: withTracked.filter((r) => r.fund).reduce((a, r) => a + num(r.fund_paid), 0),
       roomOnly: !!pts,
     },
     total: filtered.length,
@@ -369,14 +442,16 @@ export async function exportPatients(opts) {
     'เรียกเก็บ (HOSxP)': r.uc_money,
     'เรียกเก็บ (REP)': r.rep ? r.rep.claim_amount : null,
     'ได้รับ (REP)': r.rep ? r.rep.compensated : null,
-    'ได้รับ (กองทุนนี้)': r.fund ? r.fund_paid : null,
+    'ตั้งเบิก (กองทุน)': r.eligible ? r.his_fund_amount : null,
+    'ได้รับ (กองทุน)': r.fund ? r.fund_paid : null,
+    'เหตุผลที่ไม่เข้าเกณฑ์': r.fund?.reason || null,
     'TRAN_ID': r.rep?.tran_id || null,
     'REP No.': r.rep?.rep_no || null,
     'รหัสข้อผิดพลาด': r.rep?.error_code || null,
     'ผลการแก้ไข / หมายเหตุ': '',
   }));
   const ws = XLSX.utils.json_to_sheet(data.length ? data : [{ 'ขั้นตอน': 'ไม่มีข้อมูล' }]);
-  ws['!cols'] = [24, 30, 50, 12, 11, 15, 22, 14, 22, 26, 26, 30, 14, 14, 14, 14, 14, 12, 16, 12, 28].map((w) => ({ wch: w }));
+  ws['!cols'] = [24, 30, 50, 12, 11, 15, 22, 14, 22, 26, 26, 30, 14, 14, 14, 14, 14, 14, 40, 12, 16, 12, 28].map((w) => ({ wch: w }));
   ws['!autofilter'] = { ref: ws['!ref'] };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'รายชื่อคนไข้');

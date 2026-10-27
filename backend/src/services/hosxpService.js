@@ -11,7 +11,7 @@ import { optionalFeeConfig } from './settingsService.js';
  * ยอดเงินของ visit
  *  opitemrece (ค่าเริ่มต้น): income = รวมทุกรายการ, uc_money = รวมรายการที่ paidst อยู่ใน HOSXP_CLAIM_PAIDST (02 ลูกหนี้สิทธิ)
  *    เพราะ vn_stat คำนวณไว้ ณ จุดเวลาหนึ่ง รายการที่เพิ่ม/แก้ทีหลังไม่ตามมา (บาง visit uc_money = 0 ทั้งที่มีรายการ)
- *    visit ที่ไม่มีรายการใน opitemrece ใช้ค่าจาก vn_stat
+ *    visit ที่ไม่มีรายการใน opitemrece = 0 บาท (v49: ไม่ใช้ค่าค้างใน vn_stat ของ visit ที่รายการถูกลบหมดแล้ว)
  *  vn_stat: ใช้ vn_stat.income / uc_money ตรง ๆ (HOSXP_AMOUNT_SOURCE=vn_stat)
  */
 const AMOUNT_JOIN = env.amountSource === 'opitemrece' ? `
@@ -33,8 +33,8 @@ const OPD_SQL = `
          t.hipdata_code,
          v.pdx,
          ${env.amountSource === 'opitemrece'
-    ? `CASE WHEN a.vn IS NULL THEN COALESCE(v.income, 0) ELSE a.total END AS income,
-         CASE WHEN a.vn IS NULL THEN COALESCE(v.uc_money, 0) ELSE COALESCE(a.claim, 0) END AS uc_money`
+    ? `COALESCE(a.total, 0) AS income,
+         COALESCE(a.claim, 0) AS uc_money`
     : `COALESCE(v.income, 0)   AS income,
          COALESCE(v.uc_money, 0) AS uc_money`}
   FROM vn_stat v

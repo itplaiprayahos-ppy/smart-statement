@@ -101,8 +101,8 @@ function toSheetRows(rows) {
     'icode ที่เข้าเกณฑ์': r.item_codes,
     'ขาดรายการจำเป็น': r.missing_required,
     'ขาดเมื่อเทียบเคสที่ได้รับเงิน': r.missing_common,
-    'ตั้งเบิก (HOSxP)': r.his_fund_amount,
-    'ได้รับ (REP) กองทุนนี้': r.stm_fund_amount,
+    'ตั้งเบิก (กองทุน)': r.his_fund_amount,
+    'ได้รับ (กองทุน)': r.stm_fund_amount,
     'REP No.': r.rep_no,
     'TRAN_ID': r.tran_id,
     'เลขที่ REP': r.stm_docs,
@@ -150,7 +150,7 @@ export async function buildReport(opts, user) {
       ['ส่งออกโดย', user.full_name || user.username],
       ['เวลาที่ส่งออก', new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })],
       [],
-      ['กองทุน', 'ชื่อกองทุน', 'จำนวนรายการ', 'จำนวนคนไข้', 'ตั้งเบิก (HOSxP)', 'ได้รับ (REP)'],
+      ['กองทุน', 'ชื่อกองทุน', 'จำนวนรายการ', 'จำนวนคนไข้', 'ตั้งเบิก (กองทุน)', 'ได้รับ (กองทุน)'],
     ];
     funds.forEach((f) => {
       const fr = rows.filter((r) => r.fund_code === f.code);

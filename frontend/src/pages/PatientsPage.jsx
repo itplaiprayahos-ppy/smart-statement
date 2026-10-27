@@ -30,6 +30,8 @@ const PROBLEM_GROUPS = [
   { label: 'ทะเบียน', ok: 'ตรงกับ HOSxP ทั้งหมด (หรือยังไม่มีทะเบียนในช่วงนี้)', keys: ['REG_NO_HIS', 'NOT_IN_REG', 'REG_DIFF'] },
   { label: 'การเบิก', ok: 'ไม่มีปัญหา', keys: ['NO_HIS', 'DENIED', 'NOT_SENT', 'NOT_PAID', 'REP_DIFF', 'EXTRA'] },
 ];
+/** ยอดเงินของแต่ละขั้น (ระดับ visit: ค่าใช้จ่าย / เรียกเก็บ (REP) · ระดับกองทุน: ตั้งเบิก / ได้รับ) */
+const STEP_MONEY = { served: 'ค่าใช้จ่าย', eligible: 'ตั้งเบิก', sent: 'เรียกเก็บ (REP)', paid: 'ได้รับ' };
 const LEVEL_COLOR = { bad: 'var(--st-denied)', warn: 'var(--st-diff)', info: '#3b5bdb' };
 const pct = (a, b) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '–');
 const list = (v) => (v ? v.split(',').filter(Boolean) : []);
@@ -108,7 +110,7 @@ function RowDetail({ r }) {
       <div className="src-boxes">
         {r.registries.length ? <RegistryBox r={r} /> : (
           <Box title="ทะเบียน" icon="bi-journal-text" bad={null}>
-            <p className="small muted mb-0">ห้องของ visit นี้ไม่มีทะเบียนในช่วงนี้</p>
+            <p className="small muted mb-0">{r.vn ? 'ห้องของ visit นี้ไม่มีทะเบียนในช่วงนี้' : 'ไม่พบ visit ใน HOSxP จึงเทียบกับทะเบียนไม่ได้'}</p>
           </Box>
         )}
         <Box title="HOSxP" icon="bi-hospital" bad={!r.vn || hisIssues.length > 0 || fundBad}>
@@ -116,12 +118,15 @@ function RowDetail({ r }) {
             <p className="small mb-0">ไม่พบ visit วันนี้<span className="d-block muted">ตรวจ HN และวันที่ หรือดึงข้อมูล HOSxP ช่วงนี้ใหม่</span></p>
           ) : (
             <>
-              <BoxReason items={[...hisIssues, ...(fundBad ? [`REP จ่ายกองทุน ${r.fund.code} แต่ visit ไม่เข้าเกณฑ์ตามการตั้งค่ากองทุน`] : [])]} />
+              <BoxReason items={[...hisIssues, ...(fundBad ? [`REP จ่ายกองทุน ${r.fund.code} แต่ visit ไม่เข้าเกณฑ์: ${r.fund.reason || 'ตรวจการตั้งค่ากองทุน'}`] : [])]} />
               <div className="small mb-1">
                 <Field label="VN">{r.vn}</Field>
                 {r.pttype_name && <Field label="สิทธิ">{r.pttype_name}</Field>}
                 <Field label="กองทุน">{r.fund ? `${r.fund.code} ${r.fund.name || ''}` : <span className="muted">ไม่เข้าเกณฑ์กองทุนที่ตั้งค่า</span>}</Field>
                 <Field label="เรียกเก็บ (HOSxP)">{money(r.uc_money)}</Field>
+                {r.eligible && r.his_fund_amount !== null && Math.abs(r.his_fund_amount - r.uc_money) >= 0.01 && (
+                  <Field label={`ตั้งเบิก (กองทุน ${r.fund.code})`}>{money(r.his_fund_amount)}</Field>
+                )}
               </div>
               <BreakdownTable row={r} />
             </>
@@ -137,7 +142,10 @@ function RowDetail({ r }) {
             <div className="small">
               <Field label="เรียกเก็บ (REP)">{money(r.rep.claim_amount)}</Field>
               <Field label="ได้รับ (REP)">{money(r.rep.compensated)}</Field>
-              {r.fund && <Field label={`ได้รับ (กองทุน ${r.fund.code})`}>{money(r.fund_paid)}</Field>}
+              {/* แสดงเมื่อต่างจากยอดทั้ง visit เช่น REP จ่ายหลายกองทุนใน visit เดียว หรือกองทุนนี้ยังไม่จ่าย */}
+              {r.fund && Math.abs(Number(r.fund_paid || 0) - Number(r.rep.compensated || 0)) >= 0.01 && (
+                <Field label={`ได้รับ (กองทุน ${r.fund.code})`}>{money(r.fund_paid)}</Field>
+              )}
               {r.rep.tran_id && <Field label="TRAN_ID">{r.rep.tran_id}</Field>}
               {r.rep.rep_no && <Field label="REP No.">{r.rep.rep_no}</Field>}
               {r.rep.error_code && (
@@ -331,7 +339,7 @@ export default function PatientsPage() {
                 <button key={s.n} type="button" className={`pt-step ${step === s.n ? 'active' : ''}`} aria-pressed={step === s.n} onClick={() => pickStep(s.n)}>
                   <span className="t"><span className="dot" style={{ background: s.dot }} />{s.label}</span>
                   <span className="n">{int(v.persons)} <small>คน{prev ? ` · ${pct(v.persons, prev.persons)}` : ''}</small></span>
-                  <span className="m">{int(v.visits)} visit · {money(v.amount)} บาท</span>
+                  <span className="m">{int(v.visits)} visit · {STEP_MONEY[s.key]} {money(v.amount)}</span>
                   {s.key === 'served' && <span className="m">{fund.length || point.length ? 'ตามตัวกรองที่เลือก' : 'ทุก visit ในช่วงนี้'}</span>}
                   {s.key === 'eligible' && <span className="m">ไม่เข้าเกณฑ์ {int(Math.max(f.served.visits - v.visits, 0))} visit</span>}
                   {s.key === 'sent' && f.notSent.visits > 0 && <span className="drop">ยังไม่ส่ง {int(f.notSent.persons)} คน · {money(f.notSent.amount)}</span>}
@@ -358,8 +366,14 @@ export default function PatientsPage() {
             );
           })}
 
-          <div className="cmp-strip mt-3" aria-label="ยอดเงินตามตัวกรอง">
-            <span className="item"><span className="lbl">{m.roomOnly ? 'ค่าใช้จ่ายของห้องที่เลือก' : 'ค่าใช้จ่ายทั้ง visit'}</span><strong>{money(m.cost)}</strong></span>
+          <div className="cmp-strip mt-3" aria-label="ยอดระดับกองทุนตามตัวกรอง">
+            <span className="item strip-head">ยอดกองทุน</span>
+            <span className="item" title="ยอดของรายการที่เข้าเกณฑ์กองทุนใน HOSxP (กองทุนที่คัดตามสิทธิ = เรียกเก็บทั้ง visit)"><span className="lbl">ตั้งเบิก (กองทุน)</span><strong>{money(m.fundClaim)}</strong></span>
+            <span className="item" title="ยอดในคอลัมน์ของกองทุนในไฟล์ REP (ตรงกับหน้าภาพรวม)"><span className="lbl">ได้รับ (กองทุน)</span><strong className="paid">{money(m.fundPaid)}</strong></span>
+          </div>
+          <div className="cmp-strip mt-2" aria-label="ยอดระดับ visit ตามตัวกรอง">
+            <span className="item strip-head">ยอดทั้ง visit</span>
+            <span className="item"><span className="lbl">{m.roomOnly ? 'ค่าใช้จ่าย (ห้องที่เลือก)' : 'ค่าใช้จ่าย (HOSxP)'}</span><strong>{money(m.cost)}</strong></span>
             <span className="item"><span className="lbl">เรียกเก็บ (HOSxP)</span><strong>{money(m.hisClaim)}</strong></span>
             <span className="item"><span className="lbl">เรียกเก็บ (REP)</span><strong>{money(m.repClaim)}</strong></span>
             <span className="item"><span className="lbl">ได้รับ (REP)</span><strong className="paid">{money(m.repPaid)}</strong></span>

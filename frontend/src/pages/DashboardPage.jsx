@@ -139,8 +139,8 @@ export default function DashboardPage() {
 
       {/* ---------- ตัวเลขหลัก ---------- */}
       <div className="kpi-grid">
-        <KpiCard label="ยอดที่ได้รับ (REP)" value={o ? money(o.stm_amount) : '–'} sub="บาท จาก REP ทุกรอบ" />
-        <KpiCard label="ยอดที่ยังไม่พบใน REP" value={o ? money(o.not_sent_amount) : '–'}
+        <KpiCard label="ได้รับ (กองทุน)" value={o ? money(o.stm_amount) : '–'} sub="บาท ตามกองทุนที่ตั้งค่า จาก REP ทุกรอบ" />
+        <KpiCard label="ตั้งเบิก (กองทุน) ที่ยังไม่พบใน REP" value={o ? money(o.not_sent_amount) : '–'}
           sub={o?.pending_amount > 0 ? `บาท (รอผลอีก ${money(o.pending_amount)})` : 'บาท ในเดือนที่ปิดยอดแล้ว'} />
         <KpiCard label="อัตราการส่งเบิก" value={fmtRate(sendRate)} target={d.send} level={kpiLevel(sendRate, d.send)}
           sub={o ? ` ${int(o.sent)} / ${int(o.eligible)} visit` : ''} />
@@ -170,8 +170,8 @@ export default function DashboardPage() {
                 <SortTh k="send" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราการส่งเบิก<span className="th-sub">เป้า {tSend}%</span></SortTh>
                 <SortTh k="success" sort={fundSort.sort} onSort={fundSort.toggle} className="num">อัตราเคลมสำเร็จ<span className="th-sub">เป้า {tSuccess}%</span></SortTh>
                 <SortTh k="complete" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ความครบถ้วน<span className="th-sub">เป้า {tComplete}%</span></SortTh>
-                <SortTh k="notSent" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ยังไม่พบใน REP (บาท)</SortTh>
-                <SortTh k="stm" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ได้รับ (REP)</SortTh>
+                <SortTh k="notSent" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ตั้งเบิกที่ยังไม่พบใน REP</SortTh>
+                <SortTh k="stm" sort={fundSort.sort} onSort={fundSort.toggle} className="num">ได้รับ (กองทุน)</SortTh>
                 <SortTh k="pending" sort={fundSort.sort} onSort={fundSort.toggle} className="num">รอผล</SortTh>
               </tr>
             </thead>
@@ -218,7 +218,7 @@ export default function DashboardPage() {
         <p className="small muted mb-0 mt-2">
           อัตราการส่งเบิก = visit ที่พบใน REP ÷ visit ที่เข้าเกณฑ์, อัตราเคลมสำเร็จ = ได้รับเงิน ÷ ที่พบใน REP,
           ความครบถ้วน = visit ที่มีเลขบัตร 13 หลัก มี PDX และไม่ขาดรายการจำเป็น ÷ visit ที่เข้าเกณฑ์
-          ลูกศรเทียบอัตราการส่งเบิกของเดือนปิดยอดล่าสุดกับเดือนก่อนหน้า
+          ลูกศรเทียบอัตราการส่งเบิกของเดือนปิดยอดล่าสุดกับเดือนก่อนหน้า ตั้งเบิก (กองทุน) = ยอดของรายการที่เข้าเกณฑ์กองทุนใน HOSxP (กองทุนที่คัดตามสิทธิ = เรียกเก็บทั้ง visit) ได้รับ (กองทุน) = ยอดในคอลัมน์ของกองทุนนั้นในไฟล์ REP
         </p>
       </div>
 

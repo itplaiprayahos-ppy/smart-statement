@@ -583,3 +583,4 @@ th.sortable .th-sort:focus-visible { outline: 2px solid var(--cr-accent); outlin
 .src-names .ok { color: var(--st-matched); font-weight: 600; }
 .src-names .warn { color: #8a6100; font-weight: 600; }
 .src-issue { font-size: 0.74rem; color: #8a6100; margin-top: 0.1rem; white-space: normal; }
+.strip-head { font-size: 0.78rem; font-weight: 600; color: var(--cr-muted, #6b7775); min-width: 6.5rem; }

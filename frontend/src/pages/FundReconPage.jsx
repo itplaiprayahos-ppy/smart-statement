@@ -230,8 +230,8 @@ export default function FundReconPage() {
               <tr>
                 <SortTh k="patients" sort={sumSort.sort} onSort={sumSort.toggle} className="num">คนไข้</SortTh>
                 <SortTh k="visits" sort={sumSort.sort} onSort={sumSort.toggle} className="num">visit</SortTh>
-                <SortTh k="his" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ตั้งเบิก (HOSxP)</SortTh>
-                <SortTh k="stm" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ได้รับ (REP)</SortTh>
+                <SortTh k="his" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ตั้งเบิก (กองทุน)</SortTh>
+                <SortTh k="stm" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ได้รับ (กองทุน)</SortTh>
                 <SortTh k="pct" sort={sumSort.sort} onSort={sumSort.toggle} className="num">ได้รับ %</SortTh>
                 {FUND_STATUS_ORDER.map((st) => <SortTh key={st} k={st} sort={sumSort.sort} onSort={sumSort.toggle} className="num">{FUND_STATUS_META[st].label}</SortTh>)}
                 <SortTh k="extraCount" sort={sumSort.sort} onSort={sumSort.toggle} className="num" title={EXTRA_PAID_META.hint}>{EXTRA_PAID_META.label}</SortTh>
@@ -299,7 +299,7 @@ export default function FundReconPage() {
         )}
         <p className="small muted mb-0 mt-2">
           คนไข้นับไม่ซ้ำด้วยเลขบัตรประชาชน แถวรวมนับคนไข้และ visit ไม่ซ้ำแม้อยู่หลายกองทุน ส่วนจำนวนตามสถานะนับเป็นรายการกองทุนต่อ visit
-          ตั้งเบิก (HOSxP) คือราคารวมของรายการที่เข้าเกณฑ์ใน HOSxP ได้รับ (REP) มาจากคอลัมน์ของกองทุนในไฟล์ REP
+          ตั้งเบิก (กองทุน) คือราคารวมของรายการที่เข้าเกณฑ์ใน HOSxP ได้รับ (กองทุน) มาจากคอลัมน์ของกองทุนในไฟล์ REP
         </p>
       </div>
 
@@ -319,8 +319,8 @@ export default function FundReconPage() {
                 <SortTh k="month" sort={monSort.sort} onSort={monSort.toggle}>เดือน</SortTh>
                 <SortTh k="patients" sort={monSort.sort} onSort={monSort.toggle} className="num">คนไข้</SortTh>
                 <SortTh k="visits" sort={monSort.sort} onSort={monSort.toggle} className="num">visit</SortTh>
-                <SortTh k="his_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ตั้งเบิก (HOSxP)</SortTh>
-                <SortTh k="stm_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ได้รับ (REP)</SortTh>
+                <SortTh k="his_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ตั้งเบิก (กองทุน)</SortTh>
+                <SortTh k="stm_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ได้รับ (กองทุน)</SortTh>
                 <SortTh k="pct" sort={monSort.sort} onSort={monSort.toggle} className="num">ได้รับ %</SortTh>
                 <SortTh k="not_sent" sort={monSort.sort} onSort={monSort.toggle} className="num">ยังไม่พบใน REP</SortTh>
                 <SortTh k="not_sent_amount" sort={monSort.sort} onSort={monSort.toggle} className="num">ยอดที่ยังไม่ได้เบิก</SortTh>
@@ -407,8 +407,8 @@ export default function FundReconPage() {
                 <SortTh k="pttype" sort={sort} onSort={onSort}>สิทธิ</SortTh>
                 <SortTh k="items" sort={sort} onSort={onSort}>รายการที่เข้าเกณฑ์ / เหตุผล</SortTh>
                 <SortTh k="missing" sort={sort} onSort={onSort}>ขาดรายการ</SortTh>
-                <SortTh k="his" sort={sort} onSort={onSort} className="num">ตั้งเบิก (HOSxP)</SortTh>
-                <SortTh k="stm" sort={sort} onSort={onSort} className="num">ได้รับ (REP)</SortTh>
+                <SortTh k="his" sort={sort} onSort={onSort} className="num">ตั้งเบิก (กองทุน)</SortTh>
+                <SortTh k="stm" sort={sort} onSort={onSort} className="num">ได้รับ (กองทุน)</SortTh>
                 <SortTh k="diff" sort={sort} onSort={onSort} className="num">ผลต่าง</SortTh>
                 <SortTh k="rep" sort={sort} onSort={onSort}>REP / TRAN_ID / เลขที่ REP</SortTh>
                 <SortTh k="error" sort={sort} onSort={onSort}>รหัสข้อผิดพลาด</SortTh>

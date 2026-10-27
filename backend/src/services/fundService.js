@@ -414,8 +414,8 @@ export async function exportFunds(opts) {
     'รายการที่เข้าเงื่อนไข / เหตุผล': r.items,
     'ขาดรายการจำเป็น': r.missing_required,
     'ขาดเมื่อเทียบเคสที่ได้รับเงิน': r.missing_common,
-    'ตั้งเบิก (HOSxP)': r.his_fund_amount,
-    'ได้รับ (REP) กองทุนนี้': r.stm_fund_amount,
+    'ตั้งเบิก (กองทุน)': r.his_fund_amount,
+    'ได้รับ (กองทุน)': r.stm_fund_amount,
     'ผลต่าง': r.stm_fund_amount === null || r.his_fund_amount === null
       ? null : Math.round((r.stm_fund_amount - r.his_fund_amount) * 100) / 100,
     'REP No.': r.rep_no,
