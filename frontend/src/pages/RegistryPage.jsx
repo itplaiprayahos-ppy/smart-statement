@@ -1,3 +1,4 @@
+import MultiSelect from '../components/MultiSelect.jsx';
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
@@ -341,6 +342,8 @@ export default function RegistryPage() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [point, setPoint] = useState([]);   // รหัสห้อง/แผนกที่เลือก (ว่าง = ทุกห้อง)
+  const [fund, setFund] = useState([]);     // รหัสกองทุนที่เลือก (ว่าง = ทุกกองทุน)
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -357,8 +360,9 @@ export default function RegistryPage() {
   const rangeError = rangeErrorOf(range);
   const params = useMemo(() => ({
     ...range, status: status || undefined, search: search || undefined,
+    point: point.length ? point.join(',') : undefined, fund: fund.length ? fund.join(',') : undefined,
     sort: sort.key || undefined, dir: sort.key ? sort.dir : undefined,
-  }), [range, status, search, sort]);
+  }), [range, status, search, point, fund, sort]);
 
   const load = useCallback(() => {
     if (rangeError) return;
@@ -421,7 +425,19 @@ export default function RegistryPage() {
       <div className="panel">
         <div className="row g-3 align-items-end">
           <PeriodFields idPrefix="tw" value={range} onChange={(r) => { setRange(r); setPage(1); }} />
-          <div className="col-sm-6 col-lg-4">
+          <div className="col-sm-6 col-lg-3">
+            <label className="form-label" htmlFor="tw-point">ห้อง/แผนก</label>
+            <MultiSelect id="tw-point" allLabel="ทุกห้อง/แผนก" unit="ห้อง/แผนก" value={point}
+              options={points.map((p) => ({ value: p.code, label: p.name }))}
+              onChange={(v) => { setPoint(v); setStatus(''); setPage(1); }} />
+          </div>
+          <div className="col-sm-6 col-lg-3">
+            <label className="form-label" htmlFor="tw-fund">กองทุน</label>
+            <MultiSelect id="tw-fund" allLabel="ทุกกองทุน" unit="กองทุน" value={fund}
+              options={funds.map((f) => ({ value: f.code, label: `${f.code} ${f.name}` }))}
+              onChange={(v) => { setFund(v); setStatus(''); setPage(1); }} />
+          </div>
+          <div className="col-sm-12 col-lg-6">
             <label className="form-label" htmlFor="tw-q">ค้นหา</label>
             <form className="input-group" onSubmit={(e) => { e.preventDefault(); setSearch(searchInput.trim()); setPage(1); }}>
               <input id="tw-q" className="form-control" placeholder="HN, ชื่อ, VN, ห้อง, กองทุน, รายการ" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
@@ -450,7 +466,7 @@ export default function RegistryPage() {
           </button>
         </div>
       )}
-      {data?.unknownItems?.map((f) => (
+      {data?.unknownItems?.filter((f) => !fund.length || fund.includes(f.code)).map((f) => (
         <div key={f.code} className="alert alert-warning py-2 d-flex align-items-center gap-2">
           <i className="bi bi-question-circle" />
           <span className="me-auto">ทะเบียนกองทุน {f.code} มีชื่อรายการที่ระบบยังไม่รู้จัก {int(f.count)} ชื่อ จับคู่กับรายการใน HOSxP เพื่อให้เทียบได้</span>
@@ -508,7 +524,7 @@ export default function RegistryPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.rows.length === 0 && <tr><td colSpan={6} className="text-center muted py-4">ไม่มีรายการ</td></tr>}
+                {data.rows.length === 0 && <tr><td colSpan={6} className="text-center muted py-4">{(point.length || fund.length) && !status && !search ? 'ไม่มี visit ของห้อง/แผนกหรือกองทุนที่เลือกในทะเบียนช่วงนี้' : 'ไม่มีรายการ'}</td></tr>}
                 {data.rows.map((r) => {
                   const st = STATUS_STYLE[r.status] || {};
                   const isOpen = open === r.key;

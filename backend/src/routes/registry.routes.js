@@ -138,7 +138,13 @@ router.get('/compare/export', asyncHandler(async (req, res) => {
 function readAll(q) {
   const range = readDateRange(q);
   if (q.status && !THREE_WAY_STATUSES[q.status]) throw new HttpError(400, 'สถานะไม่ถูกต้อง');
-  return { ...range, status: q.status || null, search: q.search, page: q.page, pageSize: q.pageSize, ...readSort(q) };
+  // รหัสห้อง/กองทุน คั่นด้วยจุลภาค (เลือกได้หลายรายการ)
+  const code = (v) => {
+    const list = [...new Set(String(v || '').split(',').map((x) => x.trim()).filter(Boolean))];
+    if (list.length > 100 || list.some((x) => !/^[\w.\-]{1,30}$/.test(x))) throw new HttpError(400, 'รหัสห้อง/กองทุนไม่ถูกต้อง');
+    return list.length ? list : null;
+  };
+  return { ...range, status: q.status || null, search: q.search, point: code(q.point), fund: code(q.fund), page: q.page, pageSize: q.pageSize, ...readSort(q) };
 }
 
 router.get('/all', asyncHandler(async (req, res) => {

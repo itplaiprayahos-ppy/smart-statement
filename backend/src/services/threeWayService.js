@@ -240,16 +240,25 @@ const SORT = {
 const DEFAULT_SORT = (rows) => rows.sort((a, b) => String(a.sdate).localeCompare(String(b.sdate))
   || String(a.hn || '').localeCompare(String(b.hn || '')));
 
-function filterRows(all, { status, search }) {
+/** ห้อง/แผนก (เลือกได้หลายห้อง): มีทะเบียนของห้องที่เลือก หรือมีค่าใช้จ่ายของห้องนั้นใน HOSxP · กองทุน (หลายกองทุน): มีทะเบียนหรือเข้าเกณฑ์กองทุนที่เลือก */
+function scopeRows(all, { point, fund }) {
+  const pts = point?.length ? new Set(point) : null;
+  const fds = fund?.length ? new Set(fund) : null;
+  return all.filter((r) => (!pts || r.registries.some((t) => t.kind === 'point' && pts.has(t.code))
+      || r.breakdown.some((g) => pts.has(g.code) && Number(g.amount || 0) > 0))
+    && (!fds || r.registries.some((t) => t.kind === 'fund' && fds.has(t.code))));
+}
+
+function filterRows(all, { status, search, point, fund }) {
   const q = search?.trim().toLowerCase();
-  return all.filter((r) => (!status || r.status === status)
+  return scopeRows(all, { point, fund }).filter((r) => (!status || r.status === status)
     && (!q || [r.hn, r.cid, r.vn, r.patient_name, r.rep?.tran_id, ...r.registries.map((t) => t.full),
       ...r.registries.flatMap((t) => (t.items || []).map((i) => i.item))]
       .some((v) => v && String(v).toLowerCase().includes(q))));
 }
 
-export async function compareAll({ dateFrom, dateTo, status, search, page = 1, pageSize = 50, sort, dir }) {
-  const all = DEFAULT_SORT(await buildRows({ dateFrom, dateTo }));
+export async function compareAll({ dateFrom, dateTo, status, search, point, fund, page = 1, pageSize = 50, sort, dir }) {
+  const all = scopeRows(DEFAULT_SORT(await buildRows({ dateFrom, dateTo })), { point, fund });
   const summary = Object.fromEntries(ORDER.map((k) => [k, 0]));
   all.forEach((r) => { summary[r.status] += 1; });
   const totals = {

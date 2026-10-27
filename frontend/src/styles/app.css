@@ -484,3 +484,18 @@ th.sortable .th-sort:focus-visible { outline: 2px solid var(--cr-accent); outlin
 .entry-issue { margin-top: 0.35rem; padding: 0.3rem 0.5rem; border-radius: 0.35rem; background: #fdf1f0; color: #7a1b12; font-size: 0.8rem; }
 .item-table td { white-space: normal; }
 .item-table .wrap-note { white-space: normal; display: inline-block; min-width: 4.5em; text-align: right; }
+
+/* dropdown เลือกได้หลายรายการ */
+.msel { position: relative; }
+.msel-btn { text-align: left; width: 100%; background-color: #fff; }
+.msel-btn.has-value { border-color: var(--cr-primary); }
+.msel-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msel-menu {
+  position: absolute; z-index: 1050; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 2rem));
+  background: #fff; border: 1px solid var(--cr-line); border-radius: 0.5rem; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 0.5rem;
+}
+.msel-actions { display: flex; justify-content: space-between; gap: 1rem; padding: 0.15rem 0.25rem 0.35rem; font-size: 0.85rem; }
+.msel-list { max-height: 280px; overflow-y: auto; }
+.msel-opt { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.35rem 0.4rem; border-radius: 0.35rem; cursor: pointer; margin: 0; }
+.msel-opt:hover { background: rgba(0,0,0,.04); }
+.msel-opt .form-check-input { margin-top: 0.2rem; flex-shrink: 0; }
