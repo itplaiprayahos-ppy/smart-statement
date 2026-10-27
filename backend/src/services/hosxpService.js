@@ -1,11 +1,27 @@
 import { db, hosxp, withTransaction } from '../config/db.js';
-import { optionalFeeIcodes } from './settingsService.js';
+import { env } from '../config/env.js';
+import { optionalFeeConfig } from './settingsService.js';
 
 /**
  * ดึงข้อมูล OPD จาก HOSxP v4 (PostgreSQL)
  * หมายเหตุ: ชื่อตาราง/ฟิลด์อ้างอิงโครงสร้างมาตรฐานของ HOSxP
  * หากรพ.ปรับแต่งโครงสร้าง ให้ตรวจด้วย \d vn_stat แล้วแก้ query ที่นี่ที่เดียว
  */
+/**
+ * ยอดเงินของ visit
+ *  opitemrece (ค่าเริ่มต้น): income = รวมทุกรายการ, uc_money = รวมรายการที่ paidst อยู่ใน HOSXP_CLAIM_PAIDST (02 ลูกหนี้สิทธิ)
+ *    เพราะ vn_stat คำนวณไว้ ณ จุดเวลาหนึ่ง รายการที่เพิ่ม/แก้ทีหลังไม่ตามมา (บาง visit uc_money = 0 ทั้งที่มีรายการ)
+ *    visit ที่ไม่มีรายการใน opitemrece ใช้ค่าจาก vn_stat
+ *  vn_stat: ใช้ vn_stat.income / uc_money ตรง ๆ (HOSXP_AMOUNT_SOURCE=vn_stat)
+ */
+const AMOUNT_JOIN = env.amountSource === 'opitemrece' ? `
+  LEFT JOIN (
+    SELECT o.vn, SUM(COALESCE(o.sum_price, 0)) AS total,
+           SUM(COALESCE(o.sum_price, 0)) FILTER (WHERE o.paidst = ANY($3::text[])) AS claim
+    FROM opitemrece o
+    WHERE o.vstdate BETWEEN $1 AND $2 AND o.vn IS NOT NULL AND o.vn <> ''
+    GROUP BY o.vn
+  ) a ON a.vn = v.vn` : '';
 const OPD_SQL = `
   SELECT v.vn,
          v.hn,
@@ -16,13 +32,17 @@ const OPD_SQL = `
          t.name               AS pttype_name,
          t.hipdata_code,
          v.pdx,
-         COALESCE(v.income, 0)   AS income,
-         COALESCE(v.uc_money, 0) AS uc_money
+         ${env.amountSource === 'opitemrece'
+    ? `CASE WHEN a.vn IS NULL THEN COALESCE(v.income, 0) ELSE a.total END AS income,
+         CASE WHEN a.vn IS NULL THEN COALESCE(v.uc_money, 0) ELSE COALESCE(a.claim, 0) END AS uc_money`
+    : `COALESCE(v.income, 0)   AS income,
+         COALESCE(v.uc_money, 0) AS uc_money`}
   FROM vn_stat v
   LEFT JOIN patient p ON p.hn = v.hn
-  LEFT JOIN pttype  t ON t.pttype = v.pttype
+  LEFT JOIN pttype  t ON t.pttype = v.pttype${AMOUNT_JOIN}
   WHERE v.vstdate BETWEEN $1 AND $2
 `;
+const OPD_PARAMS = (from, to) => (env.amountSource === 'opitemrece' ? [from, to, env.claimPaidst] : [from, to]);
 
 /**
  * รายการค่าใช้จ่ายของ visit (opitemrece)
@@ -116,13 +136,17 @@ const DX_COLS = ['vn', 'icd10', 'diagtype', 'vstdate'];
 const DEP_SQL = `
   SELECT o.vn, COALESCE(NULLIF(trim(o.dep_code::text), ''), '-') AS dep_code,
          MIN(o.vstdate)::text AS vstdate, SUM(COALESCE(o.sum_price, 0)) AS amount, COUNT(*)::int AS items,
-         -- ค่าบริการที่ติดอัตโนมัติ (ตั้งค่าที่หน้าจัดการห้อง/แผนก) ทะเบียนจะรวมหรือไม่รวมก็ได้
-         COALESCE(SUM(o.sum_price) FILTER (WHERE o.icode = ANY($3::text[])), 0) AS optional_amount
+         -- ค่าบริการอัตโนมัติ/ยา (ตั้งค่าที่หน้าจัดการห้อง/แผนก) ทะเบียนจะรวมหรือไม่รวมก็ได้
+         --   $3 = icode ที่เลือก, $4 = ยกเว้นยาทั้งหมด (ทุก icode ที่อยู่ใน drugitems)
+         COALESCE(SUM(o.sum_price) FILTER (WHERE o.icode = ANY($3::text[]) OR ($4::boolean AND d.icode IS NOT NULL)), 0) AS optional_amount,
+         -- ส่วนที่เป็นยา (อยู่ใน drugitems) แยกไว้แสดงบนหน้าจอ
+         COALESCE(SUM(o.sum_price) FILTER (WHERE d.icode IS NOT NULL AND (o.icode = ANY($3::text[]) OR $4::boolean)), 0) AS optional_drug_amount
   FROM opitemrece o
+  LEFT JOIN drugitems d ON d.icode = o.icode
   WHERE o.vstdate BETWEEN $1 AND $2 AND o.vn IS NOT NULL AND o.vn <> ''
   GROUP BY o.vn, COALESCE(NULLIF(trim(o.dep_code::text), ''), '-')
 `;
-const DEP_COLS = ['vn', 'dep_code', 'vstdate', 'amount', 'items', 'optional_amount'];
+const DEP_COLS = ['vn', 'dep_code', 'vstdate', 'amount', 'items', 'optional_amount', 'optional_drug_amount'];
 
 /** รายชื่อแผนก (dep_code) ของ HOSxP */
 export async function listDepartments() {
@@ -208,7 +232,7 @@ async function replaceDep(client, dateFrom, dateTo, rows) {
     await client.query(
       `INSERT INTO his_opd_dep (${DEP_COLS.join(',')}) VALUES ${values.join(',')}
        ON CONFLICT (vn, dep_code) DO UPDATE SET vstdate = EXCLUDED.vstdate, amount = EXCLUDED.amount, items = EXCLUDED.items,
-         optional_amount = EXCLUDED.optional_amount`,
+         optional_amount = EXCLUDED.optional_amount, optional_drug_amount = EXCLUDED.optional_drug_amount`,
       params,
     );
   }
@@ -242,13 +266,13 @@ export async function pullOpd({ dateFrom, dateTo, userId }) {
      SELECT DISTINCT icode FROM registry_rows WHERE icode IS NOT NULL`,
   );
   const icodes = icodeRows.map((r) => r.icode);
-  const optionalIcodes = await optionalFeeIcodes();
+  const optional = await optionalFeeConfig();
 
   for (const [from, to] of months) {
-    const { rows: visits } = await hosxp.query(OPD_SQL, [from, to]);
+    const { rows: visits } = await hosxp.query(OPD_SQL, OPD_PARAMS(from, to));
     const items = icodes.length ? (await hosxp.query(ITEMS_SQL, [from, to, icodes])).rows : [];
     const dx = (await hosxp.query(DX_SQL, [from, to])).rows;
-    const dep = (await hosxp.query(DEP_SQL, [from, to, optionalIcodes])).rows;
+    const dep = (await hosxp.query(DEP_SQL, [from, to, optional.icodes, optional.allDrugs])).rows;
     await withTransaction(async (client) => {
       await replaceSnapshot(client, from, to, visits);
       await replaceItems(client, from, to, items);

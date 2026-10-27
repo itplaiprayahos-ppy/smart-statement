@@ -70,7 +70,7 @@ const ICD_OK = `
    OR (f.icd10_scope = 'any' AND EXISTS (
          SELECT 1 FROM his_opd_dx d WHERE d.vn = v.vn AND ${icdMatch('d.icd10')})))`;
 
-function fundCte() {
+export function fundCte() {
   return `${baseCte('claim')},
   -- visit ที่เข้าเกณฑ์กองทุน
   --   match_mode = items : มีรายการที่ตั้งค่าอย่างน้อย 1 รายการ และสิทธิตรงเงื่อนไข
@@ -158,6 +158,22 @@ function fundCte() {
       AND fv.vn IS NULL
   ),
   x AS (SELECT * FROM elig UNION ALL SELECT * FROM extra)`;
+}
+
+/**
+ * กองทุนของแต่ละ visit ตามการตั้งค่ากองทุน (เกณฑ์เดียวกับหน้าแยกกองทุน OPD)
+ * คืน Map vn -> [{ code, name, fund_status }] รวมกรณี REP จ่ายแต่ไม่เข้าเกณฑ์ (EXTRA_PAID)
+ */
+export async function fundsOfVisits(range, vns) {
+  if (!vns.length) return new Map();
+  const { rows } = await db.query(`${fundCte()}
+    SELECT DISTINCT x.vn, x.fund_code, f.name, x.fund_status FROM x JOIN funds f ON f.code = x.fund_code
+    WHERE x.vn = ANY($6) AND x.fund_status <> 'RECEIVED' ORDER BY x.fund_code`,
+  [...baseParams({ ...range, fund: null, onlyClaimable: false }), null, vns]);
+  const map = new Map();
+  rows.forEach((r) => (map.get(r.vn) || map.set(r.vn, []).get(r.vn))
+    .push({ code: r.fund_code, name: r.name, fund_status: r.fund_status }));
+  return map;
 }
 
 /**

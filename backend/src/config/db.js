@@ -7,7 +7,8 @@ pg.types.setTypeParser(1082, (v) => v);
 pg.types.setTypeParser(1700, (v) => (v === null ? null : Number(v)));
 
 /** ฐานข้อมูลของระบบ (อ่าน/เขียน) */
-export const db = new pg.Pool({ ...env.db, max: 10 });
+// ปิด JIT: คำสั่งกระทบยอดช่วงทั้งปีมีค่าประมาณสูง PostgreSQL จะคอมไพล์ JIT ซึ่งเสียเวลาหลายวินาทีโดยไม่ได้เร็วขึ้น
+export const db = new pg.Pool({ ...env.db, max: 10, options: '-c jit=off' });
 
 /** ฐานข้อมูล HOSxP (อ่านอย่างเดียว) */
 export const hosxp = new pg.Pool({

@@ -98,7 +98,8 @@ CREATE TABLE opitemrece (
   vstdate    DATE,
   icode      VARCHAR(7),
   qty        NUMERIC(12,2),
-  sum_price  NUMERIC(12,2)
+  sum_price  NUMERIC(12,2),
+  paidst     VARCHAR(2) DEFAULT '02'   -- 01 ชำระเองเบิกได้ / 02 ลูกหนี้สิทธิ / 03 ชำระเองเบิกไม่ได้
 );
 -- ทุก visit มีค่าบริการทั่วไปและยาพื้นฐาน
 INSERT INTO opitemrece (vn, hn, vstdate, icode, qty, sum_price)

@@ -403,7 +403,8 @@ export async function pointEntries({ dateFrom, dateTo }) {
       WHERE r.service_date BETWEEN $1 AND $2
     ),
     pd AS (
-      SELECT d.vn, p.code, SUM(d.amount) AS amount, SUM(d.optional_amount) AS optional_amount
+      SELECT d.vn, p.code, SUM(d.amount) AS amount, SUM(d.optional_amount) AS optional_amount,
+             SUM(d.optional_drug_amount) AS optional_drug_amount
       FROM his_opd_dep d JOIN service_points p ON p.is_active AND p.dep_codes ? d.dep_code
       WHERE d.vstdate BETWEEN $1 AND $2 GROUP BY d.vn, p.code
     ),
@@ -419,10 +420,10 @@ export async function pointEntries({ dateFrom, dateTo }) {
     )
     SELECT 'REG' AS src, prg.point_code AS code, prg.id AS reg_id, prg.service_date::text AS sdate, prg.hn, prg.cid,
            prg.patient_name, prg.reg_amount, prg.reg_rows, prg.vn, COALESCE(pd.amount, 0) AS point_amount,
-           COALESCE(pd.optional_amount, 0) AS optional_amount
+           COALESCE(pd.optional_amount, 0) AS optional_amount, COALESCE(pd.optional_drug_amount, 0) AS optional_drug_amount
     FROM prg LEFT JOIN pd ON pd.vn = prg.vn AND pd.code = prg.point_code
     UNION ALL
-    SELECT 'HIS', pd.code, NULL, v.vstdate::text, v.hn, v.cid, v.ptname, NULL, 0, v.vn, pd.amount, pd.optional_amount
+    SELECT 'HIS', pd.code, NULL, v.vstdate::text, v.hn, v.cid, v.ptname, NULL, 0, v.vn, pd.amount, pd.optional_amount, pd.optional_drug_amount
     FROM pd JOIN his_opd_visits v ON v.vn = pd.vn
     WHERE pd.amount - pd.optional_amount > 0
       AND NOT EXISTS (SELECT 1 FROM pr WHERE pr.vn = pd.vn AND pr.point_code = pd.code)
@@ -433,6 +434,9 @@ export async function pointEntries({ dateFrom, dateTo }) {
     const amt = Number(r.point_amount || 0);
     const opt = Number(r.optional_amount || 0);     // ค่าบริการที่ติดอัตโนมัติ ทะเบียนจะรวมหรือไม่รวมก็ได้
     const core = amt - opt;
+    // ข้อความแยก ค่าบริการอัตโนมัติ / ยา เช่น "ค่าบริการอัตโนมัติ 50.00 + ยา 70.00 บาท"
+    const drug = Math.min(Number(r.optional_drug_amount || 0), opt);
+    const optText = [opt - drug > 0 && `ค่าบริการอัตโนมัติ ${money(opt - drug)}`, drug > 0 && `ยา ${money(drug)}`].filter(Boolean).join(' + ');
     const noAmt = r.reg_amount === null || r.reg_amount === undefined;
     let status = 'MATCH';
     let issue = null;
@@ -446,15 +450,15 @@ export async function pointEntries({ dateFrom, dateTo }) {
     } else {
       const reg = Number(r.reg_amount);
       if (Math.abs(amt - reg) <= TOLERANCE) {
-        if (opt > 0) note = `ทะเบียนรวมค่าบริการอัตโนมัติ ${money(opt)} บาทแล้ว`;
+        if (opt > 0) note = `ทะเบียนรวม${optText} บาทแล้ว`;
       } else if (opt > 0 && Math.abs(core - reg) <= TOLERANCE) {
-        note = `ทะเบียนไม่รวมค่าบริการอัตโนมัติ ${money(opt)} บาท (ถือว่าตรง)`;
+        note = `ทะเบียนไม่รวม${optText} บาท (ถือว่าตรง)`;
       } else {
         status = 'HIS_DIFF';
         // เทียบกับแบบที่ใกล้ที่สุด (รวม / ไม่รวมค่าบริการอัตโนมัติ)
         const base = opt > 0 && Math.abs(core - reg) < Math.abs(amt - reg) ? core : amt;
         const diff = base - reg;
-        const how = base === core ? ` (ไม่นับค่าบริการอัตโนมัติ ${money(opt)})` : '';
+        const how = base === core ? ` (ไม่นับ${optText})` : '';
         if (!amt) issue = 'HOSxP ไม่มีค่าใช้จ่ายของห้องนี้ (ยังไม่ลง หรือลงผิดห้อง)';
         else if (diff < 0) issue = `HOSxP น้อยกว่าทะเบียน ${money(-diff)} บาท${how} (ลงค่าใช้จ่ายไม่ครบ?)`;
         else issue = `HOSxP มากกว่าทะเบียน ${money(diff)} บาท${how}`;
@@ -462,6 +466,6 @@ export async function pointEntries({ dateFrom, dateTo }) {
     }
     const issues = issue ? [issue] : [];
     if (r.reg_rows > 1) issues.push(`ทะเบียนมี ${r.reg_rows} แถวของ visit นี้${noAmt ? '' : ' (รวมยอดแล้ว)'}`);
-    return { ...r, kind: 'point', status, issues, note, his_amount: r.vn ? amt : null, optional_amount: r.vn ? opt : null };
+    return { ...r, kind: 'point', status, issues, note, his_amount: r.vn ? amt : null, optional_amount: r.vn ? opt : null, optional_drug_amount: r.vn ? drug : null };
   });
 }

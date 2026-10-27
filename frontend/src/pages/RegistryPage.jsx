@@ -6,7 +6,10 @@ import api from '../api/client.js';
 import Pagination from '../components/Pagination.jsx';
 import PeriodFields from '../components/PeriodFields.jsx';
 import SortTh from '../components/SortTh.jsx';
-import { FundUploadModal, MatchItemsModal, PointUploadModal, UploadChooser } from '../components/RegistryUploads.jsx';
+import { PointUploadModal } from '../components/RegistryUploads.jsx';
+import {
+  Box, BoxReason, BreakdownTable, DeptPopover, Field, RegistryBox, RegTags, UploadHistory,
+} from '../components/VisitParts.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useSort, useSortState } from '../hooks/useSort.js';
 import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
@@ -21,207 +24,13 @@ import { pullHosxpOpd } from '../utils/hosxp.js';
 const PAGE_SIZE = 50;
 const STATUS_STYLE = {
   NO_VISIT:        { color: 'var(--st-denied)',  icon: 'bi-person-x' },
-  UNKNOWN_ITEM:    { color: 'var(--st-multiple)', icon: 'bi-question-circle' },
   HIS_DIFF:        { color: 'var(--st-denied)',  icon: 'bi-arrow-left-right' },
   NOT_IN_REGISTRY: { color: 'var(--st-not-his)', icon: 'bi-journal-x' },
   DENIED:          { color: 'var(--st-denied)',  icon: 'bi-x-octagon' },
   NOT_IN_REP:      { color: 'var(--st-diff)',    icon: 'bi-send-exclamation' },
   REP_DIFF:        { color: 'var(--st-diff)',    icon: 'bi-currency-exchange' },
-  NOT_PAID:        { color: 'var(--st-diff)',    icon: 'bi-cash' },
   MATCH:           { color: 'var(--st-matched)', icon: 'bi-check-circle' },
 };
-/** สถานะของแต่ละทะเบียนเทียบกับ HOSxP */
-const TAG_STYLE = {
-  MATCH:           { cls: 'ok',      icon: 'bi-check-lg',          text: 'ตรงกับ HOSxP' },
-  HIS_DIFF:        { cls: 'bad',     icon: 'bi-exclamation-lg',    text: 'ไม่ตรงกับ HOSxP' },
-  NOT_IN_REGISTRY: { cls: 'missing', icon: 'bi-dash-lg',           text: 'มีใน HOSxP แต่ไม่อยู่ในทะเบียน' },
-  NO_VISIT:        { cls: 'bad',     icon: 'bi-x-lg',              text: 'ไม่พบ visit ใน HOSxP' },
-  UNKNOWN_ITEM:    { cls: 'unknown', icon: 'bi-question-lg',       text: 'ต้องจับคู่ชื่อรายการ' },
-};
-/** สถานะทะเบียนของแต่ละห้องในป๊อปอัปแยกห้อง */
-const DEP_REG = {
-  ok:      { cls: 'ok',      text: 'ตรงทะเบียน' },
-  diff:    { cls: 'bad',     text: 'ไม่ตรงทะเบียน' },
-  missing: { cls: 'missing', text: 'ไม่อยู่ในทะเบียน' },
-  none:    { cls: 'none',    text: 'ไม่มีทะเบียน' },
-};
-
-/* ---------- ป๊อปอัปค่าใช้จ่ายแยกตามห้อง (portal + fixed: ไม่ถูกกรอบเลื่อนของตารางตัด) ---------- */
-const POP_W = 360;
-function DeptPopover({ pop, onEnter, onLeave, onClose }) {
-  const ref = useRef(null);
-  const [pos, setPos] = useState(null);
-  useLayoutEffect(() => {
-    const el = ref.current; if (!el) return;
-    const a = pop.rect; const h = el.offsetHeight; const vw = window.innerWidth; const vh = window.innerHeight;
-    const left = Math.max(8, Math.min(a.right - POP_W, vw - POP_W - 8));
-    const below = a.bottom + 6;
-    const top = below + h > vh - 8 && a.top - h - 6 > 8 ? a.top - h - 6 : Math.min(below, Math.max(8, vh - h - 8));
-    setPos({ left, top });
-  }, [pop]);
-  useEffect(() => {
-    const esc = (e) => { if (e.key === 'Escape') onClose(); };
-    const away = (e) => { if (pop.pinned && ref.current && !ref.current.contains(e.target) && !pop.anchor?.contains(e.target)) onClose(); };
-    const gone = () => onClose();
-    document.addEventListener('keydown', esc);
-    document.addEventListener('mousedown', away);
-    window.addEventListener('scroll', gone, true);
-    window.addEventListener('resize', gone);
-    return () => {
-      document.removeEventListener('keydown', esc); document.removeEventListener('mousedown', away);
-      window.removeEventListener('scroll', gone, true); window.removeEventListener('resize', gone);
-    };
-  }, [pop, onClose]);
-  const r = pop.row;
-  return createPortal(
-    <div ref={ref} className="dept-pop" role="dialog" aria-label={`ค่าใช้จ่ายแยกตามห้อง VN ${r.vn}`}
-      style={{ width: POP_W, left: pos?.left ?? -9999, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}
-      onMouseEnter={onEnter} onMouseLeave={onLeave}>
-      <div className="dept-pop-head">ค่าใช้จ่ายใน HOSxP แยกตามห้อง <span className="small-id">VN {r.vn}</span></div>
-      <BreakdownTable row={r} />
-    </div>,
-    document.body,
-  );
-}
-
-/**
- * ค่าใช้จ่ายแยกตามห้อง: แผนกที่ผูกกับห้อง/แผนกเดียวกันอยู่กลุ่มเดียวกัน
- * สถานะทะเบียนแสดงครั้งเดียวต่อห้อง (เทียบยอดรวมของห้องกับทะเบียน)
- */
-function BreakdownTable({ row }) {
-  if (!row.breakdown?.length) return <div className="small muted">ไม่มีค่าใช้จ่ายใน visit นี้</div>;
-  return (
-    <table className="table table-sm mb-0 dept-table">
-      <tbody>
-        {row.breakdown.map((g) => {
-          const st = DEP_REG[g.reg] || DEP_REG.none;
-          const grouped = g.code && (g.deps.length > 1 || g.reg !== 'none');
-          const optNote = (amt) => (amt > 0 ? <div className="small-id">ค่าบริการอัตโนมัติ {money(amt)}</div> : null);
-          if (!grouped) {
-            const d = g.deps[0];
-            return (
-              <tr key={`d-${d.dep}`}>
-                <td>{d.name || `แผนก ${d.dep}`}{optNote(d.optional_amount)}</td>
-                <td className="num">{money(d.amount)}</td>
-                <td className="reg-cell"><span className={`reg-state ${st.cls}`}>{st.text}</span></td>
-              </tr>
-            );
-          }
-          return (
-            <Fragment key={`p-${g.code}`}>
-              <tr className="room-head">
-                <td>
-                  {g.name}
-                  <div className="small-id">
-                    {g.reg_amount !== null ? `ทะเบียน ${money(g.reg_amount)}` : g.reg === 'missing' ? 'ไม่อยู่ในทะเบียน' : g.reg === 'none' ? 'ไม่มีทะเบียน' : 'ทะเบียนไม่มียอด'}
-                    {g.note?.includes('ไม่รวม') && ' (ไม่รวมค่าบริการอัตโนมัติ)'}
-                  </div>
-                </td>
-                <td className="num">{money(g.amount)}</td>
-                <td className="reg-cell"><span className={`reg-state ${st.cls}`}>{st.text}</span></td>
-              </tr>
-              {g.deps.map((d) => (
-                <tr key={d.dep} className="room-dep">
-                  <td>{d.name || `แผนก ${d.dep}`}{optNote(d.optional_amount)}</td>
-                  <td className="num">{money(d.amount)}</td>
-                  <td />
-                </tr>
-              ))}
-            </Fragment>
-          );
-        })}
-        <tr className="total"><td>รวมทั้ง visit</td><td className="num">{money(row.vn_total || 0)}</td><td /></tr>
-      </tbody>
-    </table>
-  );
-}
-
-/* ---------- ป้ายทะเบียนในตาราง ---------- */
-function RegTags({ r }) {
-  return (
-    <div className="reg-tags">
-      {r.registries.map((t) => {
-        const st = TAG_STYLE[t.status] || TAG_STYLE.MATCH;
-        return (
-          <span key={`${t.kind}-${t.code}`} className={`reg-tag ${st.cls}`} title={`${t.full}: ${st.text}`}>
-            <i className={`bi ${st.icon}`} aria-hidden="true" />{t.name}
-            {t.inRegistry && t.amount !== null && <span className="amt">{money(t.amount)}</span>}
-            {!t.inRegistry && <span className="amt">ไม่อยู่ในทะเบียน</span>}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ---------- รายละเอียดเมื่อคลิกแถว ---------- */
-function Field({ label, children }) {
-  return <div className="d-flex justify-content-between gap-2"><span className="muted">{label}</span><span className="text-end">{children}</span></div>;
-}
-function Box({ title, icon, bad, children }) {
-  return (
-    <div className={`src-box ${bad === null ? 'na' : bad ? 'bad' : 'ok'}`}>
-      <div className="src-box-head"><i className={`bi ${icon} me-1`} />{title}
-        {bad !== null && <i className={`bi ${bad ? 'bi-exclamation-circle-fill' : 'bi-check-circle-fill'} ms-auto`} aria-label={bad ? 'มีจุดที่ต่าง' : 'ปกติ'} />}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function RegistryBox({ r }) {
-  const bad = r.registries.some((t) => t.status !== 'MATCH');
-  return (
-    <Box title="ทะเบียน" icon="bi-journal-text" bad={bad}>
-      {r.registries.map((t) => {
-        const st = TAG_STYLE[t.status] || TAG_STYLE.MATCH;
-        return (
-          <div key={`${t.kind}-${t.code}`} className="reg-entry small">
-            <div className="d-flex align-items-center gap-1 fw-semibold">
-              <span className={`reg-dot ${st.cls}`} aria-hidden="true" />{t.full}
-            </div>
-            {t.kind === 'point' ? (
-              <>
-                <Field label="ทะเบียน">{!t.inRegistry ? 'ไม่อยู่ในทะเบียน' : t.amount === null ? <span className="muted">ไม่มียอด</span> : `${money(t.amount)} บาท`}</Field>
-                <Field label="HOSxP ห้องนี้">{t.his_amount === null ? '–' : `${money(t.his_amount)} บาท`}</Field>
-                {t.optional_amount > 0 && (
-                  <Field label="ไม่นับค่าบริการอัตโนมัติ">{money(t.his_amount - t.optional_amount)} บาท</Field>
-                )}
-                {t.note && <div className="text-success-emphasis"><i className="bi bi-info-circle me-1" />{t.note}</div>}
-              </>
-            ) : (
-              <table className="table table-sm mb-0 item-table">
-                <thead><tr><th>รายการ</th><th className="num">ทะเบียน</th><th className="num">HOSxP</th></tr></thead>
-                <tbody>
-                  {t.items.map((it, i) => (
-                    <tr key={`${it.icode || it.item}-${i}`}>
-                      <td>{it.item}{!it.inRegistry && <span className="muted"> (ไม่อยู่ในทะเบียน)</span>}</td>
-                      <td className="num" title="ทะเบียน">{it.reg_price === null ? '–' : money(it.reg_price)}</td>
-                      <td className="num" title="HOSxP">{it.his_amount !== null ? money(it.his_amount) : <span className="text-danger-emphasis wrap-note">{it.his_note || '–'}</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {t.status !== 'MATCH' && (
-              <div className="entry-issue">
-                <span className="fw-semibold">{t.label}</span>
-                {t.issues.map((x) => <div key={x}>{x}</div>)}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </Box>
-  );
-}
-
-/** เหตุผลที่กล่องขึ้นสีแดง (ใส่ไว้ในกล่องเลย ไม่ต้องเลื่อนลงไปดูด้านล่าง) */
-function BoxReason({ items }) {
-  if (!items.length) return null;
-  return <div className="entry-issue mb-2">{items.map((x) => <div key={x}>{x}</div>)}</div>;
-}
-
 function RowDetail({ r }) {
   return (
     <div className="row-detail">
@@ -237,6 +46,12 @@ function RowDetail({ r }) {
               <div className="small mb-1">
                 <Field label="VN">{r.vn}</Field>
                 {r.pttype_name && <Field label="สิทธิ">{r.pttype_name}</Field>}
+                <Field label="กองทุน">{r.funds.some((f) => f.eligible)
+                  ? r.funds.filter((f) => f.eligible).map((f) => `${f.code} ${f.name}`).join(', ')
+                  : <span className="muted">ไม่เข้าเกณฑ์กองทุนใด</span>}</Field>
+                {r.funds.filter((f) => !f.eligible).map((f) => (
+                  <div key={f.code} className="text-danger-emphasis">REP จ่ายกองทุน {f.code} แต่ visit ไม่เข้าเกณฑ์ตามการตั้งค่ากองทุน</div>
+                ))}
               </div>
               <BreakdownTable row={r} />
             </>
@@ -285,57 +100,6 @@ function RowDetail({ r }) {
   );
 }
 
-/* ---------- ประวัติอัปโหลด (ทุกชนิดรวมกัน) ---------- */
-function UploadHistory({ uploads, onRemove }) {
-  const { user, isAdmin } = useAuth();
-  const [show, setShow] = useState(false);
-  const s = useSort(uploads, { key: 'created_at', dir: 'desc' });
-  return (
-    <div className="panel">
-      <button type="button" className="btn btn-link p-0" onClick={() => setShow((v) => !v)}>
-        <i className={`bi ${show ? 'bi-chevron-down' : 'bi-chevron-right'} me-1`} />ประวัติอัปโหลดทะเบียน ({uploads.length})
-      </button>
-      {show && (
-        <div className="table-wrap mt-2">
-          <table className="table table-sm data-table mb-0">
-            <thead>
-              <tr>
-                <SortTh k="created_at" sort={s.sort} onSort={s.toggle}>เวลา</SortTh>
-                <SortTh k="target_name" sort={s.sort} onSort={s.toggle}>ทะเบียน</SortTh>
-                <SortTh k="file_name" sort={s.sort} onSort={s.toggle}>ไฟล์</SortTh>
-                <SortTh k="date_from" sort={s.sort} onSort={s.toggle}>ช่วงวันที่</SortTh>
-                <SortTh k="current_rows" sort={s.sort} onSort={s.toggle} className="num">ใช้อยู่</SortTh>
-                <SortTh k="uploaded_by_name" sort={s.sort} onSort={s.toggle}>ผู้อัปโหลด</SortTh>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {s.sorted.map((b) => (
-                <tr key={`${b.kind}-${b.id}`}>
-                  <td className="text-nowrap">{thaiDateTime(b.created_at)}</td>
-                  <td>{b.kind === 'fund' ? `กองทุน ${b.target_code}` : b.target_name || b.target_code}</td>
-                  <td>{b.file_name}</td>
-                  <td className="text-nowrap">{thaiDate(b.date_from)} – {thaiDate(b.date_to)}</td>
-                  <td className="num">{b.current_rows ? int(b.current_rows) : <span className="muted">ถูกแทนที่</span>}</td>
-                  <td>{b.uploaded_by_name || '–'}</td>
-                  <td className="text-end">
-                    {(isAdmin || b.uploaded_by === user.id) && (
-                      <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => onRemove(b)} title="ลบ">
-                        <i className="bi bi-trash" /><span className="visually-hidden">ลบ</span>
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {uploads.length === 0 && <tr><td colSpan={7} className="muted text-center">ยังไม่มีการอัปโหลด</td></tr>}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ---------- หน้าเทียบ 3 แหล่ง ---------- */
 export default function RegistryPage() {
   const [range, setRange] = useState(lastMonthRange());
@@ -347,7 +111,7 @@ export default function RegistryPage() {
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [modal, setModal] = useState(null);          // choose | point | fund | { match: fund }
+  const [modal, setModal] = useState(null);          // 'point' = หน้าต่างอัปโหลดทะเบียน
   const [points, setPoints] = useState([]);
   const [funds, setFunds] = useState([]);
   const [uploads, setUploads] = useState([]);
@@ -415,9 +179,9 @@ export default function RegistryPage() {
       <div className="page-head">
         <div>
           <h1>เทียบ 3 แหล่ง</h1>
-          <p>งานหน้างาน: ทะเบียนทุกห้อง/แผนกและกองทุน ลงใน HOSxP ครบและตรงไหม และ visit นั้นเบิกได้หรือยัง (ผลฝั่ง REP ใช้เกณฑ์เดียวกับเมนู “กระทบยอด OPD”) ชี้ที่ยอด HOSxP เพื่อดูว่าค่าใช้จ่ายมาจากห้องไหน</p>
+          <p>งานหน้างาน: ทะเบียนของทุกห้อง/แผนก (จุดบริการ) ลงใน HOSxP ครบและตรงไหม กองทุนดูจากการตั้งค่ากองทุนใน HOSxP และ visit นั้นเบิกได้หรือยัง (ผลฝั่ง REP ใช้เกณฑ์เดียวกับเมนู “กระทบยอด OPD”) ชี้ที่ยอด HOSxP เพื่อดูว่าค่าใช้จ่ายมาจากห้องไหน</p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => setModal('choose')}>
+        <button type="button" className="btn btn-primary" onClick={() => setModal('point')}>
           <i className="bi bi-upload me-1" />อัปโหลดทะเบียน
         </button>
       </div>
@@ -440,7 +204,7 @@ export default function RegistryPage() {
           <div className="col-sm-12 col-lg-6">
             <label className="form-label" htmlFor="tw-q">ค้นหา</label>
             <form className="input-group" onSubmit={(e) => { e.preventDefault(); setSearch(searchInput.trim()); setPage(1); }}>
-              <input id="tw-q" className="form-control" placeholder="HN, ชื่อ, VN, ห้อง, กองทุน, รายการ" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+              <input id="tw-q" className="form-control" placeholder="HN, ชื่อ, VN, ห้อง, กองทุน" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
               <button type="submit" className="btn btn-outline-primary">ค้นหา</button>
             </form>
           </div>
@@ -460,25 +224,18 @@ export default function RegistryPage() {
       {data?.staleFee && !data?.stale && (
         <div className="alert alert-warning py-2 d-flex flex-wrap align-items-center gap-2">
           <i className="bi bi-arrow-repeat" />
-          <span className="me-auto">ตั้งค่าค่าบริการที่ติดอัตโนมัติหลังดึงข้อมูล HOSxP ครั้งล่าสุด ดึงข้อมูลช่วงนี้ใหม่เพื่อให้ระบบแยกยอดรายการนี้</span>
+          <span className="me-auto">ตั้งค่าค่าบริการอัตโนมัติ/ยาหลังดึงข้อมูล HOSxP ครั้งล่าสุด ดึงข้อมูลช่วงนี้ใหม่เพื่อให้ระบบแยกยอดรายการนี้</span>
           <button type="button" className="btn btn-sm btn-warning" onClick={async () => { if (await pullHosxpOpd(range)) load(); }}>
             <i className="bi bi-database-down me-1" />ดึงข้อมูล HOSxP ช่วงนี้
           </button>
         </div>
       )}
-      {data?.unknownItems?.filter((f) => !fund.length || fund.includes(f.code)).map((f) => (
-        <div key={f.code} className="alert alert-warning py-2 d-flex align-items-center gap-2">
-          <i className="bi bi-question-circle" />
-          <span className="me-auto">ทะเบียนกองทุน {f.code} มีชื่อรายการที่ระบบยังไม่รู้จัก {int(f.count)} ชื่อ จับคู่กับรายการใน HOSxP เพื่อให้เทียบได้</span>
-          <button type="button" className="btn btn-sm btn-warning" onClick={() => setModal({ match: f })}>จับคู่รายการ</button>
-        </div>
-      ))}
       {data && data.registryRows === 0 && (
         <div className="panel text-center py-4">
           <i className="bi bi-journal-arrow-up fs-1 muted" aria-hidden="true" />
           <h2 className="h5 mt-2">ยังไม่มีทะเบียนในช่วงนี้</h2>
-          <p className="muted mx-auto" style={{ maxWidth: 520 }}>อัปโหลดทะเบียนของห้อง/แผนก หรือของกองทุน ระบบจะเทียบกับ HOSxP และ REP ให้ทันที</p>
-          <button type="button" className="btn btn-primary" onClick={() => setModal('choose')}><i className="bi bi-upload me-1" />อัปโหลดทะเบียน</button>
+          <p className="muted mx-auto" style={{ maxWidth: 520 }}>อัปโหลดทะเบียนของห้อง/แผนก (จุดบริการ) ระบบจะเทียบกับ HOSxP และ REP ให้ทันที</p>
+          <button type="button" className="btn btn-primary" onClick={() => setModal('point')}><i className="bi bi-upload me-1" />อัปโหลดทะเบียน</button>
         </div>
       )}
 
@@ -524,7 +281,7 @@ export default function RegistryPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.rows.length === 0 && <tr><td colSpan={6} className="text-center muted py-4">{(point.length || fund.length) && !status && !search ? 'ไม่มี visit ของห้อง/แผนกหรือกองทุนที่เลือกในทะเบียนช่วงนี้' : 'ไม่มีรายการ'}</td></tr>}
+                {data.rows.length === 0 && <tr><td colSpan={6} className="text-center muted py-4">{(point.length || fund.length) && !status && !search ? 'ไม่มี visit ของห้อง/แผนกหรือกองทุนที่เลือกในช่วงนี้' : 'ไม่มีรายการ'}</td></tr>}
                 {data.rows.map((r) => {
                   const st = STATUS_STYLE[r.status] || {};
                   const isOpen = open === r.key;
@@ -587,10 +344,7 @@ export default function RegistryPage() {
 
       <UploadHistory uploads={uploads} onRemove={removeUpload} />
 
-      {modal === 'choose' && <UploadChooser onClose={() => setModal(null)} onPick={(k) => setModal(k)} />}
       {modal === 'point' && <PointUploadModal points={points} onClose={() => setModal(null)} onDone={uploaded} />}
-      {modal === 'fund' && <FundUploadModal funds={funds} onClose={() => setModal(null)} onDone={uploaded} />}
-      {typeof modal === 'object' && modal?.match && <MatchItemsModal fund={modal.match} onClose={() => { setModal(null); load(); }} onDone={() => {}} />}
     </>
   );
 }

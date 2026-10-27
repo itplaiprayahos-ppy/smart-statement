@@ -21,6 +21,7 @@ import reportRoutes from './routes/reports.routes.js';
 import registryRoutes from './routes/registry.routes.js';
 import statusRoutes from './routes/status.routes.js';
 import pointRoutes from './routes/points.routes.js';
+import patientRoutes from './routes/patients.routes.js';
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/funds', fundRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/registry', registryRoutes);
+app.use('/api/patients', patientRoutes);
 app.use('/api/status', statusRoutes);
 app.use('/api/points', pointRoutes);
 app.use('/api', notFound);

@@ -6,63 +6,83 @@ import { money, thaiDateTime } from '../utils/format.js';
 const blank = { originalCode: null, code: '', name: '', dep_codes: [], sort_order: 0, is_active: true };
 
 /**
- * ค่าบริการที่ติดอัตโนมัติ เช่น ค่าบริการผู้ป่วยนอก 50 บาท
+ * ค่าบริการอัตโนมัติ/ยา เช่น ค่าบริการผู้ป่วยนอก 50 บาท หรือค่ายา
  * ทะเบียนของห้อง/แผนกจะรวมหรือไม่รวมรายการเหล่านี้ก็ได้ ระบบเทียบทั้ง 2 แบบ ตรงแบบใดแบบหนึ่งถือว่าตรง
  */
 function OptionalFees() {
   const [items, setItems] = useState([]);
+  const [allDrugs, setAllDrugs] = useState(false);
+  const [source, setSource] = useState('nondrug');
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
   const [saved, setSaved] = useState(false);
-  useEffect(() => { api.get('/points/optional-fees').then((r) => setItems(r.data.items)).catch(() => {}); }, []);
-  const save = async (next) => {
+  useEffect(() => {
+    api.get('/points/optional-fees').then((r) => { setItems(r.data.items); setAllDrugs(!!r.data.allDrugs); }).catch(() => {});
+  }, []);
+  const save = async (next, nextAll = allDrugs) => {
     try {
-      const { data } = await api.put('/points/optional-fees', { items: next });
-      setItems(data.items); setSaved(true); notifySuccess('บันทึกแล้ว');
+      const { data } = await api.put('/points/optional-fees', { items: next, allDrugs: nextAll });
+      setItems(data.items); setAllDrugs(!!data.allDrugs); setSaved(true); notifySuccess('บันทึกแล้ว');
     } catch (err) { showError(err); }
   };
   const find = async (e) => {
     e.preventDefault();
     if (q.trim().length < 2) return;
     try {
-      const { data } = await api.get('/funds/items/search', { params: { source: 'nondrug', q: q.trim() } });
+      const { data } = await api.get('/funds/items/search', { params: { source, q: q.trim() } });
       setResults(data.items.slice(0, 30));
     } catch (err) { showError(err, 'ค้นหาใน HOSxP ไม่สำเร็จ'); }
   };
   return (
     <div className="panel">
-      <div className="panel-title mb-1">ค่าบริการที่ติดอัตโนมัติ (ทะเบียนจะรวมหรือไม่รวมก็ได้)</div>
+      <div className="panel-title mb-1">ค่าบริการอัตโนมัติ/ยา ที่ทะเบียนจะรวมหรือไม่รวมก็ได้</div>
       <p className="small muted mb-2">
-        เช่น ค่าบริการผู้ป่วยนอก ที่ HOSxP คิดทุกครั้งที่มารับบริการ ระบบเทียบยอดทะเบียนกับ HOSxP ทั้งแบบรวมและไม่รวมรายการเหล่านี้
-        ตรงแบบใดแบบหนึ่งถือว่าตรง ใช้กับทุกห้อง/แผนก
+        เช่น ค่าบริการผู้ป่วยนอก ที่ HOSxP คิดทุกครั้งที่มารับบริการ หรือค่ายาที่หน้างานไม่ได้จดในทะเบียน
+        ระบบเทียบยอดทะเบียนกับ HOSxP ทั้งแบบรวมและไม่รวมรายการเหล่านี้ ตรงแบบใดแบบหนึ่งถือว่าตรง ใช้กับทุกห้อง/แผนก
       </p>
+      <div className="form-check mb-2">
+        <input id="opt-all-drugs" type="checkbox" className="form-check-input" checked={allDrugs}
+          onChange={(e) => save(items, e.target.checked)} />
+        <label className="form-check-label" htmlFor="opt-all-drugs">
+          ยกเว้นค่ายาทั้งหมด <span className="small muted">(ทุกรายการที่อยู่ในตาราง drugitems ของ HOSxP ไม่ต้องเลือกทีละรายการ)</span>
+        </label>
+      </div>
       <div className="d-flex flex-wrap gap-2 mb-2">
         {items.length === 0 && <span className="small muted">ยังไม่ได้เลือกรายการ</span>}
         {items.map((it) => (
           <span key={it.icode} className="reg-tag ok">
+            <span className="muted me-1">{it.source === 'drug' ? 'ยา' : 'ค่าบริการ'}</span>
             {it.icode} {it.name}{it.price != null && <span className="amt">{money(it.price)}</span>}
             <button type="button" className="btn btn-link btn-sm p-0 ms-1 text-danger" aria-label={`เอา ${it.name} ออก`}
               onClick={() => save(items.filter((x) => x.icode !== it.icode))}><i className="bi bi-x-lg" /></button>
           </span>
         ))}
       </div>
-      <form className="input-group input-group-sm" style={{ maxWidth: 420 }} onSubmit={find}>
-        <input className="form-control" placeholder="ค้นหารายการใน HOSxP เช่น ค่าบริการผู้ป่วยนอก" value={q} onChange={(e) => setQ(e.target.value)} aria-label="ค้นหารายการค่าบริการ" />
-        <button type="submit" className="btn btn-outline-primary">ค้นหา</button>
+      <form className="d-flex flex-wrap gap-2" style={{ maxWidth: 560 }} onSubmit={find}>
+        <select className="form-select form-select-sm" style={{ width: 'auto' }} value={source}
+          onChange={(e) => { setSource(e.target.value); setResults(null); }} aria-label="ประเภทรายการ">
+          <option value="nondrug">ค่าบริการ (nondrugitems)</option>
+          <option value="drug">ยา (drugitems)</option>
+        </select>
+        <div className="input-group input-group-sm flex-grow-1" style={{ minWidth: 220 }}>
+          <input className="form-control" placeholder={source === 'drug' ? 'ค้นหายา เช่น Paracetamol' : 'ค้นหา เช่น ค่าบริการผู้ป่วยนอก'}
+            value={q} onChange={(e) => setQ(e.target.value)} aria-label="ค้นหารายการใน HOSxP" />
+          <button type="submit" className="btn btn-outline-primary">ค้นหา</button>
+        </div>
       </form>
       {results && (
-        <div className="list-group list-group-flush small mt-1" style={{ maxWidth: 520 }}>
+        <div className="list-group list-group-flush small mt-1" style={{ maxWidth: 560 }}>
           {results.length === 0 && <div className="list-group-item muted">ไม่พบรายการ</div>}
           {results.map((it) => (
             <button key={it.icode} type="button" className="list-group-item list-group-item-action py-1"
               disabled={items.some((x) => x.icode === it.icode)}
-              onClick={() => { save([...items, { icode: it.icode, name: it.name, price: it.price }]); setResults(null); setQ(''); }}>
+              onClick={() => { save([...items, { icode: it.icode, name: it.name, price: it.price, source }]); setResults(null); setQ(''); }}>
               {it.icode} {it.name} {it.price != null && <span className="muted">({money(it.price)})</span>}
             </button>
           ))}
         </div>
       )}
-      {saved && <div className="small text-warning-emphasis mt-2"><i className="bi bi-arrow-repeat me-1" />ดึงข้อมูล HOSxP ใหม่ (แถบด้านบน หรือหน้าเทียบ 3 แหล่ง) เพื่อให้ระบบแยกยอดรายการเหล่านี้</div>}
+      {saved && <div className="small text-warning-emphasis mt-2"><i className="bi bi-arrow-repeat me-1" />ดึงข้อมูล HOSxP ใหม่ (ปุ่มในหน้ารายชื่อคนไข้) เพื่อให้ระบบแยกยอดรายการเหล่านี้</div>}
     </div>
   );
 }

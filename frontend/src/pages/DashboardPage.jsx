@@ -179,7 +179,7 @@ export default function DashboardPage() {
               {fundSort.sorted.filter((f) => showEmpty || !isEmptyFund(f)).map((f) => {
                 const k = f.kpi;
                 return (
-                  <tr key={f.code} onClick={isExec ? undefined : () => navigate('/recon/funds')}
+                  <tr key={f.code} onClick={isExec ? undefined : () => navigate(`/patients?fund=${f.code}`)}
                     title={isExec ? undefined : 'เปิดหน้าแยกกองทุน'}>
                     <td><strong>{f.code}</strong> <span className="muted">{f.name}</span>
                       {f.item_count === 0 && !f.track_only && f.match_mode === 'items' && <div className="small text-warning-emphasis">ยังไม่ได้ตั้งค่ารายการ</div>}

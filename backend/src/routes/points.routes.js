@@ -34,11 +34,12 @@ router.get('/departments', asyncHandler(async (req, res) => {
     : info.list);
 }));
 
-/* ---------- ค่าบริการที่ติดอัตโนมัติ (ทะเบียนจะรวมหรือไม่รวมก็ได้) ---------- */
+/* ---------- ค่าบริการอัตโนมัติ/ยา ที่ทะเบียนจะรวมหรือไม่รวมก็ได้ ---------- */
 router.get('/optional-fees', asyncHandler(async (_req, res) => res.json(await getOptionalFeeItems())));
 router.put('/optional-fees', requireRole('admin'), asyncHandler(async (req, res) => {
-  const result = await saveOptionalFeeItems(req.body?.items, req.user.id);
-  await audit(req, 'optional_fees_update', { icodes: result.items.map((i) => i.icode) });
+  const allDrugs = typeof req.body?.allDrugs === 'boolean' ? req.body.allDrugs : undefined;
+  const result = await saveOptionalFeeItems(req.body?.items, req.user.id, allDrugs);
+  await audit(req, 'optional_fees_update', { icodes: result.items.map((i) => i.icode), allDrugs: result.allDrugs });
   res.json(result);
 }));
 

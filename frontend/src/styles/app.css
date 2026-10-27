@@ -482,6 +482,7 @@ th.sortable .th-sort:focus-visible { outline: 2px solid var(--cr-accent); outlin
   .src-boxes { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr); }
 }
 .entry-issue { margin-top: 0.35rem; padding: 0.3rem 0.5rem; border-radius: 0.35rem; background: #fdf1f0; color: #7a1b12; font-size: 0.8rem; }
+.entry-ok { margin-top: 0.35rem; padding: 0.3rem 0.5rem; border-radius: 0.35rem; background: #e9f6ee; color: #1f6b3f; font-size: 0.8rem; }
 .item-table td { white-space: normal; }
 .item-table .wrap-note { white-space: normal; display: inline-block; min-width: 4.5em; text-align: right; }
 
@@ -499,3 +500,86 @@ th.sortable .th-sort:focus-visible { outline: 2px solid var(--cr-accent); outlin
 .msel-opt { display: flex; align-items: flex-start; gap: 0.5rem; padding: 0.35rem 0.4rem; border-radius: 0.35rem; cursor: pointer; margin: 0; }
 .msel-opt:hover { background: rgba(0,0,0,.04); }
 .msel-opt .form-check-input { margin-top: 0.2rem; flex-shrink: 0; }
+
+/* ---------- รายชื่อคนไข้ ---------- */
+.pt-funnel { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.pt-step {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 0.1rem; text-align: left;
+  background: #fff; border: 1px solid var(--cr-line); padding: 0.7rem 0.9rem 0.7rem 1.4rem; font: inherit; color: inherit; cursor: pointer;
+}
+.pt-step:first-child { border-radius: 0.6rem 0 0 0.6rem; padding-left: 0.9rem; }
+.pt-step:last-child { border-radius: 0 0.6rem 0.6rem 0; }
+.pt-step + .pt-step { border-left: 0; }
+.pt-step:not(:last-child)::after {
+  content: ""; position: absolute; right: -9px; top: 50%; width: 16px; height: 16px; background: inherit; z-index: 1;
+  border-top: 1px solid var(--cr-line); border-right: 1px solid var(--cr-line); transform: translateY(-50%) rotate(45deg);
+}
+.pt-step:hover { background: #f7faf9; }
+.pt-step.active { background: #e6f2ef; border-color: var(--cr-primary); }
+.pt-step.active::after { border-color: var(--cr-primary); }
+.pt-step .t { font-size: 0.8rem; color: var(--cr-muted, #6b7775); display: flex; align-items: center; gap: 0.35rem; }
+.pt-step .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.pt-step .n { font-size: 1.45rem; font-weight: 700; line-height: 1.2; }
+.pt-step .n small { font-size: 0.8rem; font-weight: 500; color: var(--cr-muted, #6b7775); }
+.pt-step .m { font-size: 0.78rem; color: var(--cr-muted, #6b7775); }
+.pt-step .drop { font-size: 0.78rem; color: var(--st-denied); font-weight: 500; }
+.pt-prog { display: flex; align-items: center; white-space: nowrap; }
+.pt-prog i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #b8c2c0; background: #fff; display: inline-block; flex-shrink: 0; }
+.pt-prog i.done { background: var(--st-matched); border-color: var(--st-matched); }
+.pt-prog i.stop { background: var(--st-denied); border-color: var(--st-denied); }
+.pt-prog b { width: 16px; height: 2px; background: #dfe5e4; display: inline-block; }
+.pt-prog b.done { background: var(--st-matched); }
+.pt-table td { vertical-align: top; }
+.pt-table .todo-cell { min-width: 220px; max-width: 340px; }
+.todo-k { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 0.05rem 0.45rem; border-radius: 0.3rem; margin-bottom: 0.15rem; }
+.todo-k.bad { background: #fdecea; color: #a5281b; }
+.todo-k.warn { background: #fff4e0; color: #8a5300; }
+.todo-k.info { background: #edf1ff; color: #2f4bc0; }
+.todo-k.ok { background: #e7f5ec; color: #1f6b3f; }
+.todo-k.none { background: #eef1f0; color: #5b6664; }
+.reg-tag.none { border-style: dashed; color: var(--cr-muted, #6b7775); }
+@media (max-width: 767.98px) {
+  .pt-funnel { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
+  .pt-step, .pt-step:first-child, .pt-step:last-child { border-radius: 0.6rem; border: 1px solid var(--cr-line); padding-left: 0.9rem; }
+  .pt-step::after { display: none; }
+}
+.pt-table td { white-space: normal; }
+.pt-table td.num, .pt-table td.text-nowrap { white-space: nowrap; }
+.pt-table .fund-cell { min-width: 90px; max-width: 150px; }
+.pt-table .prog-cell { min-width: 110px; max-width: 130px; }
+.pt-table .reg-cell-td { min-width: 150px; max-width: 210px; }
+.pt-table .pt-cell { max-width: 150px; }
+.pt-table .todo-cell { min-width: 200px; max-width: 300px; }
+.pt-table .todo-cell .reason { white-space: normal; overflow: visible; text-overflow: clip; -webkit-line-clamp: 2; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.pt-table .reason { font-size: 0.8rem; color: var(--cr-ink); margin-top: 0.15rem; }
+.pt-table .chev { font-size: 0.8rem; margin-top: 0.2rem; }
+.pt-table .pt-cell .hn { font-variant-numeric: tabular-nums; }
+.panel.is-loading { opacity: 0.6; transition: opacity 0.15s; }
+.pill-group { min-width: 3.6rem; }
+.pt-table .reg-tags { flex-wrap: wrap; } .pt-table .reg-tag { white-space: normal; max-width: 100%; }
+/* พบในแหล่งไหน: ทะเบียน · HOSxP · REP */
+.src-list { display: flex; flex-direction: column; gap: 0.15rem; }
+.src-chip { display: flex; align-items: center; gap: 0.3rem; font-size: 0.76rem; line-height: 1.25; white-space: nowrap; }
+.src-chip i { width: 15px; height: 15px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.65rem; color: #fff; flex-shrink: 0; }
+.src-chip .src-n { font-weight: 600; min-width: 3.3rem; }
+.src-chip .src-t { color: var(--cr-muted, #6b7775); }
+.src-chip.ok i { background: var(--st-matched); }
+.src-chip.warn i { background: #e0a800; }
+.src-chip.warn .src-t { color: #8a6100; }
+.src-chip.na .src-t { color: #9aa5a3; }
+.src-chip.bad i { background: var(--st-denied); }
+.src-chip.bad .src-t { color: var(--st-denied); }
+.src-chip.na i { background: #c3cbc9; }
+.pt-table .prog-cell { min-width: 170px; max-width: 220px; }
+.room-list { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.85rem; }
+.pt-table .reg-cell-td { min-width: 120px; max-width: 170px; }
+.pt-table .prog-cell { min-width: 150px; } .pt-table .todo-cell { min-width: 180px; } .pt-table .fund-cell { min-width: 80px; max-width: 130px; }
+.pt-table .todo-cell { min-width: 170px; }
+/* จุด 3 จุด: ทะเบียน → HOSxP → REP */
+.src-dots .pt-prog i { width: 13px; height: 13px; }
+.src-dots .pt-prog b { width: 30px; }
+.src-dots .pt-prog i.warn { background: #e0a800; border-color: #e0a800; }
+.src-names { display: grid; grid-template-columns: repeat(3, 43px); margin-left: -15px; margin-top: 0.15rem; font-size: 0.68rem; text-align: center; color: #9aa5a3; }
+.src-names .ok { color: var(--st-matched); font-weight: 600; }
+.src-names .warn { color: #8a6100; font-weight: 600; }
+.src-issue { font-size: 0.74rem; color: #8a6100; margin-top: 0.1rem; white-space: normal; }

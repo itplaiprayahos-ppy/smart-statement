@@ -43,7 +43,9 @@ export function baseCte(compare) {
   ),
   -- รายการจาก REP: หาคีย์ที่ตรงกับ HOSxP (เลขบัตรก่อน แล้วค่อย HN)
   nl AS (
-    SELECT l.*,
+    -- เลือกเฉพาะคอลัมน์ที่ใช้ (ไม่ดึง raw ที่เป็น jsonb ขนาดใหญ่ ช่วยให้เร็วขึ้นมากเมื่อเลือกช่วงทั้งปี)
+    SELECT l.id, l.pid, l.hn, l.service_date, l.patient_name, l.fund, l.rep_no, l.tran_id, l.stm_doc, l.stm_period,
+           l.claim_amount, l.compensated, l.error_code, l.fund_amounts,
            CASE WHEN c1.c IS NOT NULL THEN l.pid WHEN c2.c IS NOT NULL THEN c2.mkey ELSE l.pid END AS mkey,
            COALESCE(c1.c, c2.c, 0) AS his_n
     FROM nhso_lines l
