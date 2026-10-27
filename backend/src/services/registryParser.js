@@ -17,7 +17,7 @@ export const REGISTRY_COLUMNS = {
   icode:        { label: 'icode', aliases: ['icode', 'รหัสรายการ', 'รหัสค่าบริการ'] },
   item_text:    { label: 'รายการค่าบริการ', aliases: ['รายการค่าบริการ', 'รายการบริการ', 'ชื่อรายการ', 'รายการ', 'บริการ', 'ค่าบริการ'] },
   qty:          { label: 'จำนวน', aliases: ['จำนวน', 'qty'] },
-  price:        { label: 'ราคา / ยอดรวม', aliases: ['ราคา', 'จำนวนเงิน', 'ราคารวม', 'ยอดรวม', 'ยอดเงิน', 'รวมเงิน', 'ยอดค่าใช้จ่าย', 'ค่าใช้จ่าย', 'ค่าบริการ(บาท)', 'บาท', 'รวม'] },
+  price:        { label: 'ราคา / ยอดรวม', aliases: ['ราคา', 'จำนวนเงิน', 'ราคารวม', 'ยอดรวม', 'ยอดเงิน', 'รวมเงิน', 'ยอดค่าใช้จ่าย', 'ค่าใช้จ่าย', 'ค่าบริการ(บาท)', 'ค่าบริการรวม', 'ค่ารักษาพยาบาล', 'ค่ารักษา', 'บาท', 'รวม', 'ยอด', 'เงิน', 'amount', 'price'] },
 };
 const KEYS = Object.keys(REGISTRY_COLUMNS);
 const MAX_ERRORS = 300;
@@ -66,6 +66,17 @@ export function parseRegistry(buffer) {
   }).sort((a, b) => b.required - a.required || b.header.score - a.header.score || b.dataRows - a.dataRows);
   if (!candidates.length) throw new Error('ไม่พบข้อมูลในไฟล์');
   const { name: sheetName, rows, header: { idx, cols } } = candidates[0];
+
+  // คอลัมน์ชื่อ "ค่าบริการ" ที่ข้างในเป็นตัวเลข (เช่น 500) คือยอดเงิน ไม่ใช่ชื่อรายการ
+  // ใช้เมื่อไฟล์ไม่มีคอลัมน์ยอดเงินอื่น: ค่าที่ไม่ว่างอย่างน้อย 80% อ่านเป็นตัวเลขได้
+  if (cols.price === undefined && cols.item_text !== undefined) {
+    const vals = rows.slice(idx + 1).map((r) => (r || [])[cols.item_text]).filter((v) => text(v) !== null);
+    const numeric = vals.filter((v) => { const m = parseMoney(v); return !m.error && m.value !== null; }).length;
+    if (vals.length && numeric / vals.length >= 0.8) {
+      cols.price = cols.item_text;
+      delete cols.item_text;
+    }
+  }
 
   const missing = [];
   if (cols.service_date === undefined) missing.push('วันที่ให้บริการ');

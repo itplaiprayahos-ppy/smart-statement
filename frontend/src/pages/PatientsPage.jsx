@@ -86,7 +86,7 @@ function RoomCell({ r, pointName }) {
         return (
           <div key={code}>
             {t?.name || pointName.get(code) || code}
-            {t?.inRegistry && t.amount !== null && <div className="small-id">ทะเบียน {money(t.amount)}</div>}
+            {t?.inRegistry && <div className="small-id">ทะเบียน {t.amount !== null ? money(t.amount) : 'ไม่มียอด'}</div>}
           </div>
         );
       })}
