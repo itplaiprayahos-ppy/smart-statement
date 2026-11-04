@@ -262,6 +262,11 @@ export async function pullOpd({ dateFrom, dateTo, userId }) {
     `SELECT DISTINCT fi.icode FROM fund_items fi JOIN funds f ON f.code = fi.fund_code
      WHERE f.is_active AND NOT f.track_only
      UNION
+     -- รายการของกิจกรรมย่อยในกองทุน
+     SELECT DISTINCT ai.icode FROM fund_activity_items ai
+     JOIN fund_activities a ON a.id = ai.activity_id AND a.is_active
+     JOIN funds f ON f.code = a.fund_code AND f.is_active AND NOT f.track_only
+     UNION
      -- รายการที่อยู่ในทะเบียนของหน้างาน ให้ดึงด้วยเพื่อเทียบ 3 แหล่ง
      SELECT DISTINCT icode FROM registry_rows WHERE icode IS NOT NULL`,
   );

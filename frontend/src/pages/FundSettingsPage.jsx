@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api/client.js';
 import SortTh from '../components/SortTh.jsx';
+import FundActivities from '../components/FundActivities.jsx';
 import { useSort } from '../hooks/useSort.js';
 import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
 import { money } from '../utils/format.js';
@@ -14,7 +15,7 @@ const MATCH_MODES = [
 ];
 
 const blankFund = () => ({
-  originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], pttypes: [],
+  originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], activities: [], pttypes: [],
   hipdata_codes: ['UCS'], target_send: 95, target_success: 90, target_complete: 95, track_only: false,
   match_mode: 'items', icd10Text: '', icd10_scope: 'any',
 });
@@ -192,6 +193,10 @@ export default function FundSettingsPage() {
       setForm({
         originalCode: data.code, code: data.code, name: data.name, sort_order: data.sort_order,
         is_active: data.is_active, columnsText: (data.stm_columns || []).join('\n'), items: data.items,
+        activities: (data.activities || []).map((a) => ({
+          name: a.name, items: a.items || [], items_mode: a.items_mode || 'any',
+          icd10Text: (a.icd10_codes || []).join(', '), icd10_scope: a.icd10_scope || 'any', is_active: a.is_active !== false,
+        })),
         pttypes: legacyGroups && pttypeList.length ? codesOf(legacyGroups) : (data.pttypes || []),
         hipdata_codes: legacyGroups && !pttypeList.length ? legacyGroups : [],
         track_only: !!data.track_only,
@@ -239,10 +244,16 @@ export default function FundSettingsPage() {
     if (!form.track_only && form.match_mode === 'icd' && !parseIcd(form.icd10Text).length) {
       return showError('วิธีคัดแบบ ICD-10 ต้องใส่รหัสโรคอย่างน้อย 1 รายการ');
     }
+    const badAct = form.match_mode === 'items' && form.activities.find((a) => !a.name.trim() || !a.items.length);
+    if (badAct) return showError(badAct.name.trim() ? `กิจกรรม "${badAct.name}" ต้องมีรายการอย่างน้อย 1 รายการ` : 'กิจกรรมย่อยต้องมีชื่อ');
     const body = {
       code: form.code, name: form.name, sort_order: Number(form.sort_order) || 0, is_active: form.is_active,
       stm_columns: form.columnsText.split('\n').map((s) => s.trim()).filter(Boolean),
       items: form.items,
+      activities: form.match_mode === 'items' ? form.activities.map((a) => ({
+        name: a.name, items: a.items, items_mode: a.items_mode, icd10_codes: parseIcd(a.icd10Text),
+        icd10_scope: a.icd10_scope, is_active: a.is_active,
+      })) : [],
       pttypes: form.pttypes,
       // รายการรหัสสิทธิเป็นตัวกำหนด (ไม่ใช้กลุ่มสิทธิแล้ว) ยกเว้นยังโหลดรายการสิทธิจาก HOSxP ไม่ได้
       hipdata_codes: pttypeList.length ? [] : form.hipdata_codes,
@@ -307,8 +318,8 @@ export default function FundSettingsPage() {
                 onClick={() => open(f.code)}>
                 <div className="d-flex justify-content-between">
                   <strong>{f.code}</strong>
-                  <span className={f.item_count || f.track_only || f.match_mode !== 'items' ? 'small muted' : 'small text-warning-emphasis'}>
-                    {f.track_only ? 'ติดตามยอดรับ' : f.match_mode === 'rights' ? 'คัดตามสิทธิ' : f.match_mode === 'icd' ? 'คัดตาม ICD-10' : f.item_count ? `${f.item_count} รายการ` : 'ยังไม่มีรายการ'}
+                  <span className={f.item_count || f.activities?.length || f.track_only || f.match_mode !== 'items' ? 'small muted' : 'small text-warning-emphasis'}>
+                    {f.track_only ? 'ติดตามยอดรับ' : f.match_mode === 'rights' ? 'คัดตามสิทธิ' : f.match_mode === 'icd' ? 'คัดตาม ICD-10' : f.activities?.length ? `${f.activities.length} กิจกรรม` : f.item_count ? `${f.item_count} รายการ` : 'ยังไม่มีรายการ'}
                   </span>
                 </div>
                 <div className="small">{f.name}{!f.is_active && <span className="muted"> (ปิดใช้งาน)</span>}</div>
@@ -446,6 +457,11 @@ export default function FundSettingsPage() {
                     <span className="small muted fw-normal"> รายการจำเป็น {form.items.filter((x) => x.required).length}</span>
                   )}
                 </div>
+                {form.activities.some((a) => a.is_active) && (
+                  <div className="alert alert-info py-2 small">
+                    กองทุนนี้มีกิจกรรมย่อย ระบบคัด visit ด้วยเงื่อนไขของกิจกรรม (ด้านล่าง) รายการตรงนี้ใช้เฉพาะ “รายการจำเป็น” และการวิเคราะห์รายการ
+                  </div>
+                )}
                 <p className="small muted">
                   visit ที่มีรายการใดรายการหนึ่งจะเข้าเกณฑ์กองทุน ติ๊ก “จำเป็น” ที่รายการที่ต้องเบิกคู่กันเสมอ
                   ระบบจะแจ้งว่า visit ที่เคลมไม่สำเร็จขาดรายการจำเป็นตัวไหน
@@ -550,6 +566,9 @@ export default function FundSettingsPage() {
                 </div>
               </div>
 
+              )}
+              {form.match_mode === 'items' && (
+                <FundActivities value={form.activities} parseIcd={parseIcd} onChange={(activities) => update({ activities })} />
               )}
               </>)}
 

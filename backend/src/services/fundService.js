@@ -55,8 +55,8 @@ const RIGHTS_OK = `
  *  - "C00-C96"  : ช่วง เทียบตามความยาวของรหัสที่ใส่ (C00-C96 = C000 ถึง C969)
  * เทียบสตริงแบบ COLLATE "C" ให้ลำดับตัวอักษร/ตัวเลขคงที่ทุกการตั้งค่าภาษาของฐานข้อมูล
  */
-const icdMatch = (col) => `EXISTS (
-  SELECT 1 FROM jsonb_array_elements_text(f.icd10_codes) c
+const icdMatch = (col, list = 'f.icd10_codes') => `EXISTS (
+  SELECT 1 FROM jsonb_array_elements_text(${list}) c
   WHERE CASE WHEN position('-' in c.value) > 0
     THEN left(${col}, length(split_part(c.value, '-', 1))) COLLATE "C" >= split_part(c.value, '-', 1) COLLATE "C"
      AND left(${col}, length(split_part(c.value, '-', 2))) COLLATE "C" <= split_part(c.value, '-', 2) COLLATE "C"
@@ -70,8 +70,40 @@ const ICD_OK = `
    OR (f.icd10_scope = 'any' AND EXISTS (
          SELECT 1 FROM his_opd_dx d WHERE d.vn = v.vn AND ${icdMatch('d.icd10')})))`;
 
+/** เงื่อนไขรหัสโรคของกิจกรรมย่อย (a): ว่าง = ไม่กรอง */
+const ACT_ICD_OK = `
+  (jsonb_array_length(a.icd10_codes) = 0
+   OR (a.icd10_scope = 'pdx' AND ${icdMatch("upper(replace(COALESCE(v.pdx, ''), '.', ''))", 'a.icd10_codes')})
+   OR (a.icd10_scope = 'any' AND EXISTS (
+         SELECT 1 FROM his_opd_dx d WHERE d.vn = v.vn AND ${icdMatch('d.icd10', 'a.icd10_codes')})))`;
+
+/** กองทุนนี้มีกิจกรรมย่อยที่เปิดใช้งาน (ใช้เงื่อนไขของกิจกรรมแทนรายการระดับกองทุน) */
+const HAS_ACT = (fundCol) => `EXISTS (SELECT 1 FROM fund_activities ax WHERE ax.fund_code = ${fundCol} AND ax.is_active)`;
+
 export function fundCte() {
   return `${baseCte('claim')},
+  -- กิจกรรมย่อยที่ visit ผ่าน: มีรายการของกิจกรรม (ใดก็ได้ / ครบทุกรายการ) + รหัสโรคของกิจกรรม + สิทธิ/ICD ของกองทุน
+  fact AS MATERIALIZED (
+    SELECT i.vn, a.fund_code, a.id AS act_id, a.name AS act_name
+    FROM his_opd_items i
+    JOIN his_opd_visits v ON v.vn = i.vn
+    JOIN fund_activity_items ai ON ai.icode = i.icode
+    JOIN fund_activities a ON a.id = ai.activity_id AND a.is_active
+    JOIN funds f ON f.code = a.fund_code AND f.is_active AND NOT f.track_only AND f.match_mode = 'items'
+    WHERE i.vstdate BETWEEN $1 AND $2
+      AND ${RIGHTS_OK}
+      AND ${ICD_OK}
+      AND ${ACT_ICD_OK}
+      ${EXCLUDED_SQL}
+      AND ($5::text IS NULL OR a.fund_code = $5)
+    GROUP BY i.vn, a.fund_code, a.id
+    HAVING a.items_mode = 'any'
+        OR COUNT(DISTINCT ai.icode) = (SELECT COUNT(*) FROM fund_activity_items x WHERE x.activity_id = a.id)
+  ),
+  fact2 AS (
+    SELECT vn, fund_code, array_agg(act_id) AS acts, string_agg(act_name, ', ' ORDER BY act_name) AS names
+    FROM fact GROUP BY vn, fund_code
+  ),
   -- visit ที่เข้าเกณฑ์กองทุน
   --   match_mode = items : มีรายการที่ตั้งค่าอย่างน้อย 1 รายการ และสิทธิตรงเงื่อนไข
   --   match_mode = rights: ทุก visit ของสิทธิที่ตั้งค่า ที่มียอดเรียกเก็บ (ยอดตั้งเบิก = uc_money ของ visit)
@@ -85,11 +117,21 @@ export function fundCte() {
     JOIN fund_items fi ON fi.icode = i.icode
     JOIN funds f ON f.code = fi.fund_code AND f.is_active AND NOT f.track_only AND f.match_mode = 'items'
     WHERE i.vstdate BETWEEN $1 AND $2
+      AND NOT ${HAS_ACT('f.code')}
       AND ${RIGHTS_OK}
       AND ${ICD_OK}
       ${EXCLUDED_SQL}
       AND ($5::text IS NULL OR fi.fund_code = $5)
     GROUP BY i.vn, fi.fund_code
+    UNION ALL
+    -- กองทุนที่มีกิจกรรมย่อย: ยอดตั้งเบิก = รายการของกิจกรรมที่ผ่าน (รายการซ้ำนับครั้งเดียว) ชื่อกิจกรรมอยู่ในช่อง items
+    SELECT fact2.vn, fact2.fund_code,
+           (SELECT SUM(i.sum_price) FROM his_opd_items i WHERE i.vn = fact2.vn
+              AND i.icode IN (SELECT ai.icode FROM fund_activity_items ai WHERE ai.activity_id = ANY (fact2.acts))),
+           fact2.names,
+           COALESCE((SELECT array_agg(DISTINCT i.icode::text) FROM his_opd_items i WHERE i.vn = fact2.vn
+              AND i.icode IN (SELECT ai.icode FROM fund_activity_items ai WHERE ai.activity_id = ANY (fact2.acts))), ARRAY[]::text[])
+    FROM fact2
     UNION ALL
     SELECT v.vn, f.code, v.uc_money,
            CASE WHEN f.match_mode = 'icd' THEN 'ICD-10: ' || COALESCE(
@@ -271,7 +313,8 @@ export async function pullCoverage(client, { dateFrom, dateTo }) {
            (SELECT MAX(l.created_at) FROM his_pull_logs l
              WHERE l.claim_type = 'OPD' AND l.date_from <= m.s AND l.date_to >= m.e) AS pulled_at
     FROM m ORDER BY m.month_start`, [dateFrom, dateTo]);
-  const { rows: [chg] } = await client.query('SELECT MAX(created_at) AS at FROM fund_items');
+  const { rows: [chg] } = await client.query(
+    'SELECT GREATEST((SELECT MAX(created_at) FROM fund_items), (SELECT MAX(created_at) FROM fund_activity_items)) AS at');
   return {
     notPulledMonths: rows.filter((r) => !r.pulled_at).map((r) => r.month),
     stalePulledMonths: rows.filter((r) => r.pulled_at && chg.at && r.pulled_at < chg.at).map((r) => r.month),

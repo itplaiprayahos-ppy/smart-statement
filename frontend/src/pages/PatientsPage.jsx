@@ -123,6 +123,7 @@ function RowDetail({ r }) {
                 <Field label="VN">{r.vn}</Field>
                 {r.pttype_name && <Field label="สิทธิ">{r.pttype_name}</Field>}
                 <Field label="กองทุน">{r.fund ? `${r.fund.code} ${r.fund.name || ''}` : <span className="muted">ไม่เข้าเกณฑ์กองทุนที่ตั้งค่า</span>}</Field>
+                {r.fund?.activities && <Field label="กิจกรรม">{r.fund.activities}</Field>}
                 <Field label="เรียกเก็บ (HOSxP)">{money(r.uc_money)}</Field>
                 {r.eligible && r.his_fund_amount !== null && Math.abs(r.his_fund_amount - r.uc_money) >= 0.01 && (
                   <Field label={`ตั้งเบิก (กองทุน ${r.fund.code})`}>{money(r.his_fund_amount)}</Field>
@@ -259,7 +260,11 @@ export default function PatientsPage() {
   const f = data?.funnel;
   const m = data?.money;
   const fundOptions = [
-    ...funds.map((x) => ({ value: x.code, label: `${x.code} ${x.name}`, hint: x.track_only ? 'ติดตามยอดรับ' : undefined })),
+    ...funds.flatMap((x) => [
+      { value: x.code, label: `${x.code} ${x.name}`, hint: x.track_only ? 'ติดตามยอดรับ' : undefined },
+      // กิจกรรมย่อยของกองทุน เลือกแยกได้ (รหัส PP.a12)
+      ...(x.activities || []).map((a) => ({ value: `${x.code}.a${a.id}`, label: `\u00a0\u00a0└ ${x.code} · ${a.name}` })),
+    ]),
     { value: NO_FUND, label: 'ไม่เข้าเกณฑ์กองทุนใด' },
   ];
   const filtered = point.length || fund.length || step || problem || search;
@@ -430,7 +435,7 @@ export default function PatientsPage() {
                         <td className="text-nowrap">{thaiDate(r.sdate)}</td>
                         <td className="pt-cell"><span className="hn">{r.hn || '–'}</span><div className="small-id text-truncate">{r.patient_name}</div></td>
                         <td className="reg-cell-td"><RoomCell r={r} pointName={pointName} /></td>
-                        <td className="fund-cell">{r.fund ? <span title={r.fund.name}>{r.fund.code}<div className="small-id">{r.fund.name}</div></span> : <span className="muted small">ไม่เข้าเกณฑ์</span>}</td>
+                        <td className="fund-cell">{r.fund ? <span title={r.fund.name}>{r.fund.code}<div className="small-id">{r.fund.activities || r.fund.name}</div></span> : <span className="muted small">ไม่เข้าเกณฑ์</span>}</td>
                         <td className="prog-cell"><Sources r={r} /></td>
                         <td className="num">
                           {!r.vn ? <span className="muted small">ไม่พบ visit</span> : (

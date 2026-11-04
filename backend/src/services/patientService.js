@@ -64,6 +64,13 @@ async function explainExtra(extra) {
     db.query('SELECT vn, icd10 FROM his_opd_dx WHERE vn = ANY($1)', [vns]),
     db.query('SELECT DISTINCT vn, icode FROM his_opd_items WHERE vn = ANY($1)', [vns]),
   ]);
+  const { rows: acts } = await db.query(`
+    SELECT a.id, a.fund_code, a.name, a.items_mode, a.icd10_codes, a.icd10_scope,
+           COALESCE(array_agg(ai.icode::text) FILTER (WHERE ai.icode IS NOT NULL), '{}') AS icodes
+    FROM fund_activities a LEFT JOIN fund_activity_items ai ON ai.activity_id = a.id
+    WHERE a.fund_code = ANY($1) AND a.is_active GROUP BY a.id ORDER BY a.sort_order, a.id`, [codes]);
+  const actsOf = new Map();
+  acts.forEach((a) => (actsOf.get(a.fund_code) || actsOf.set(a.fund_code, []).get(a.fund_code)).push(a));
   const fundMap = new Map(funds.map((f) => [f.code, f]));
   const fundIcodes = new Map();
   fitems.forEach((i) => (fundIcodes.get(i.fund_code) || fundIcodes.set(i.fund_code, new Set()).get(i.fund_code)).add(String(i.icode)));
@@ -89,7 +96,23 @@ async function explainExtra(extra) {
       const ok = f.icd10_scope === 'pdx' ? icdHit(v.pdx, icds) : (dxOf.get(b.vn) || [v.pdx]).some((c) => icdHit(c, icds));
       if (!ok) why.push(`รหัสโรค ${v.pdx || '(ไม่มี PDX)'} ไม่ตรงเงื่อนไข ICD-10 ของกองทุน`);
     }
-    if (f.match_mode === 'items') {
+    const fActs = f.match_mode === 'items' ? actsOf.get(f.code) || [] : [];
+    if (fActs.length) {
+      // กิจกรรมย่อย: บอกเหตุผลของกิจกรรมที่มีรายการอยู่แล้ว (ขาดรายการ / รหัสโรคไม่ตรง)
+      const have = itemsOf.get(b.vn) || new Set();
+      const dxList = dxOf.get(b.vn) || [v.pdx];
+      const near = fActs.filter((a) => a.icodes.some((i) => have.has(i)));
+      if (!near.length) why.push(`visit ไม่มีรายการของกิจกรรมใดในกองทุน ${f.code} (${fActs.map((a) => a.name).join(', ')})`);
+      near.forEach((a) => {
+        const miss = a.items_mode === 'all' ? a.icodes.filter((i) => !have.has(i)) : [];
+        const icdOk = !(a.icd10_codes || []).length
+          || (a.icd10_scope === 'pdx' ? icdHit(v.pdx, a.icd10_codes) : dxList.some((c) => icdHit(c, a.icd10_codes)));
+        const parts = [];
+        if (miss.length) parts.push(`ขาดรายการ ${miss.join(', ')}`);
+        if (!icdOk) parts.push(`รหัสโรค ${(a.icd10_scope === 'pdx' ? [v.pdx] : dxList).filter(Boolean).join(', ') || '(ไม่มี)'} ไม่ตรง ${a.icd10_codes.join(', ')}`);
+        if (parts.length) why.push(`${a.name}: ${parts.join(' และ ')}`);
+      });
+    } else if (f.match_mode === 'items') {
       const set = fundIcodes.get(f.code);
       if (!set?.size) why.push(`กองทุน ${f.code} ยังไม่ได้ตั้งรายการค่าบริการ`);
       else if (![...(itemsOf.get(b.vn) || [])].some((i) => set.has(i))) why.push(`visit ไม่มีรายการค่าบริการ/ยาที่ตั้งไว้ในกองทุน ${f.code}`);
@@ -111,10 +134,12 @@ async function loadAll(range) {
              r.sdate::text AS sdate, r.pttype_name, r.income, r.uc_money,
              r.line_id, r.rep_no, r.tran_id, r.claim_amount, r.compensated, r.error_code,
              r.status AS rep_status, r.grp_n,
-             x.fund_code, f.name AS fund_name, x.fund_status, x.stm_fund_amount, x.his_fund_amount
+             x.fund_code, f.name AS fund_name, x.fund_status, x.stm_fund_amount, x.his_fund_amount,
+             fact2.acts AS act_ids, fact2.names AS act_names
       FROM r
       LEFT JOIN x ON COALESCE(x.vn, '') = COALESCE(r.vn, '') AND COALESCE(x.line_id, 0) = COALESCE(r.line_id, 0)
-      LEFT JOIN funds f ON f.code = x.fund_code`, params),
+      LEFT JOIN funds f ON f.code = x.fund_code
+      LEFT JOIN fact2 ON fact2.vn = x.vn AND fact2.fund_code = x.fund_code`, params),
     db.query(`SELECT vn, dep_code, SUM(amount) AS amount, SUM(optional_amount) AS optional_amount,
                      SUM(optional_drug_amount) AS optional_drug_amount
               FROM his_opd_dep WHERE vstdate BETWEEN $1 AND $2 GROUP BY vn, dep_code`, [range.dateFrom, range.dateTo]),
@@ -201,7 +226,8 @@ function buildRow(b, { depMap, regByVn, maps, reasons }) {
   return finish({
     key: `${b.vn || `L${b.line_id}`}:${b.fund_code || NO_FUND}`,
     vn: b.vn, sdate: b.sdate, hn: b.hn, cid: b.cid, patient_name: b.patient_name, pttype_name: b.pttype_name,
-    fund: b.fund_code ? { code: b.fund_code, name: b.fund_name, status: fs, reason: reasons?.get(`${b.vn}|${b.fund_code}`) || null } : null,
+    fund: b.fund_code ? { code: b.fund_code, name: b.fund_name, status: fs, reason: reasons?.get(`${b.vn}|${b.fund_code}`) || null,
+      activities: b.act_names || null, act_ids: b.act_ids || [] } : null,
     eligible, sent, paid, served: !!b.vn,
     his_total: b.vn ? (deps.length ? deps.reduce((a, d) => a + d.amount, 0) : num(b.income)) : null,
     uc_money: ucMoney,
@@ -262,8 +288,9 @@ function scope(rows, { point, fund, search }, includeTracked = false) {
   const fds = fund?.length ? new Set(fund) : null;
   const q = search?.trim().toLowerCase();
   return rows.filter((r) => (!pts || r.rooms.some((c) => pts.has(c)))
-    && (fds ? fds.has(r.fund?.code || NO_FUND) : includeTracked || !r.tracked)
-    && (!q || [r.hn, r.cid, r.vn, r.patient_name, r.pttype_name, r.rep?.tran_id, r.rep?.rep_no, r.fund?.code, r.fund?.name]
+    // กองทุน หรือกิจกรรมย่อย (รหัส "PP.a12" = กองทุน PP กิจกรรม id 12)
+    && (fds ? fds.has(r.fund?.code || NO_FUND) || (r.fund?.act_ids || []).some((id) => fds.has(`${r.fund.code}.a${id}`)) : includeTracked || !r.tracked)
+    && (!q || [r.hn, r.cid, r.vn, r.patient_name, r.pttype_name, r.rep?.tran_id, r.rep?.rep_no, r.fund?.code, r.fund?.name, r.fund?.activities]
       .some((v) => v && String(v).toLowerCase().includes(q))));
 }
 const STEP_OK = {
@@ -330,6 +357,8 @@ async function dataStamp() {
       (SELECT MAX(id) FROM point_registry_batches), (SELECT COUNT(*) FROM point_registry_batches),
       (SELECT md5(COALESCE(string_agg(f::text, '|' ORDER BY f.code), '')) FROM funds f),
       (SELECT md5(COALESCE(string_agg(i::text, '|' ORDER BY i.fund_code, i.icode), '')) FROM fund_items i),
+      (SELECT md5(COALESCE(string_agg(a::text, '|' ORDER BY a.id), '')) FROM fund_activities a),
+      (SELECT md5(COALESCE(string_agg(ai::text, '|' ORDER BY ai.activity_id, ai.icode), '')) FROM fund_activity_items ai),
       (SELECT md5(COALESCE(string_agg(p::text, '|' ORDER BY p.code), '')) FROM service_points p),
       (SELECT MAX(updated_at)::text FROM app_settings)) AS stamp`);
   return r.stamp;
@@ -436,6 +465,7 @@ export async function exportPatients(opts) {
     'VN': r.vn,
     'สิทธิ': r.pttype_name,
     'กองทุน': r.fund ? `${r.fund.code} ${r.fund.name || ''}`.trim() : 'ไม่เข้าเกณฑ์กองทุน',
+    'กิจกรรมย่อย': r.fund?.activities || null,
     'ห้อง/แผนก': r.rooms.map((c) => maps.pointName.get(c) || c).join(', '),
     'ทะเบียน': r.registries.map((t) => `${t.full}${t.amount !== null ? ` ${money(t.amount)}` : ''}${t.inRegistry ? '' : ' (ไม่อยู่ในทะเบียน)'}`).join(', '),
     [pts ? 'ค่าใช้จ่ายของห้องที่เลือก' : 'ค่าใช้จ่ายทั้ง visit']: r.served ? costOf(r, pts) : null,

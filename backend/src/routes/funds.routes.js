@@ -10,7 +10,9 @@ const router = Router();
 
 router.get('/', asyncHandler(async (_req, res) => {
   const { rows } = await db.query(
-    `SELECT f.*, COUNT(fi.icode)::int AS item_count
+    `SELECT f.*, COUNT(fi.icode)::int AS item_count,
+            COALESCE((SELECT json_agg(json_build_object('id', a.id, 'name', a.name) ORDER BY a.sort_order, a.id)
+                      FROM fund_activities a WHERE a.fund_code = f.code AND a.is_active), '[]'::json) AS activities
      FROM funds f LEFT JOIN fund_items fi ON fi.fund_code = f.code
      GROUP BY f.code ORDER BY f.sort_order, f.code`,
   );
@@ -45,7 +47,13 @@ router.get('/:code', asyncHandler(async (req, res) => {
     'SELECT icode, item_name, source, required, created_at FROM fund_items WHERE fund_code = $1 ORDER BY source, item_name',
     [fund.code],
   );
-  res.json({ ...fund, items });
+  const { rows: activities } = await db.query(`
+    SELECT a.id, a.name, a.items_mode, a.icd10_codes, a.icd10_scope, a.is_active, a.sort_order,
+           COALESCE(json_agg(json_build_object('icode', ai.icode, 'item_name', ai.item_name, 'source', ai.source)
+                    ORDER BY ai.item_name) FILTER (WHERE ai.icode IS NOT NULL), '[]'::json) AS items
+    FROM fund_activities a LEFT JOIN fund_activity_items ai ON ai.activity_id = a.id
+    WHERE a.fund_code = $1 GROUP BY a.id ORDER BY a.sort_order, a.id`, [fund.code]);
+  res.json({ ...fund, items, activities });
 }));
 
 /**
@@ -96,7 +104,29 @@ function readFund(body = {}) {
   if (body.match_mode === 'icd' && !body.track_only && !readIcd10(body.icd10_codes).length) {
     throw new HttpError(400, 'วิธีคัดแบบ ICD-10 ต้องใส่รหัสโรคอย่างน้อย 1 รายการ');
   }
+  // กิจกรรมย่อย (ใช้กับวิธีคัดแบบค่าบริการเท่านั้น)
+  const activities = (Array.isArray(body.activities) ? body.activities : []).map((a, idx) => {
+    const aname = String(a?.name || '').trim().slice(0, 200);
+    if (!aname) throw new HttpError(400, `กิจกรรมย่อยลำดับที่ ${idx + 1} ยังไม่มีชื่อ`);
+    const aitems = [];
+    const seen = new Set();
+    (Array.isArray(a.items) ? a.items : []).forEach((it) => {
+      const icode = String(it?.icode || '').trim();
+      if (!icode || icode.length > 20 || seen.has(icode)) return;
+      seen.add(icode);
+      aitems.push({ icode, item_name: it.item_name ? String(it.item_name).slice(0, 300) : null, source: it.source === 'drug' ? 'drug' : 'nondrug' });
+    });
+    if (!aitems.length) throw new HttpError(400, `กิจกรรม "${aname}" ต้องมีรายการค่าบริการ/ยาอย่างน้อย 1 รายการ`);
+    return {
+      name: aname, items: aitems, sort_order: idx,
+      items_mode: a.items_mode === 'all' ? 'all' : 'any',
+      icd10_codes: readIcd10(a.icd10_codes), icd10_scope: a.icd10_scope === 'pdx' ? 'pdx' : 'any',
+      is_active: a.is_active !== false,
+    };
+  });
+  if (new Set(activities.map((a) => a.name)).size !== activities.length) throw new HttpError(400, 'ชื่อกิจกรรมย่อยซ้ำกัน');
   return {
+    activities,
     code, name, cols, items, pttypes, hipdataCodes, targets, trackOnly: body.track_only === true,
     matchMode: ['rights', 'icd'].includes(body.match_mode) ? body.match_mode : 'items',
     // แบบสิทธิการรักษาไม่ใช้รหัสโรค
@@ -143,13 +173,45 @@ async function saveFund(req, res, originalCode) {
         [f.code, it.icode, it.item_name, it.source, it.required],
       );
     }
+    // กิจกรรมย่อย: แทนที่ทั้งชุด แต่คงเวลาเพิ่มของรายการเดิม (ใช้เตือนให้ดึง HOSxP ใหม่เฉพาะรายการที่เพิ่มจริง)
+    const { rows: old } = await client.query(
+      `SELECT ai.icode, MIN(ai.created_at) AS at FROM fund_activity_items ai
+       JOIN fund_activities a ON a.id = ai.activity_id WHERE a.fund_code = $1 GROUP BY ai.icode`, [f.code]);
+    const oldAt = new Map(old.map((r) => [r.icode, r.at]));
+    // กิจกรรมเดิม (ชื่อเดียวกัน) คงรหัสไว้ ลิงก์ตัวกรองที่บันทึกไว้จึงยังใช้ได้
+    const acts = f.matchMode === 'items' ? f.activities : [];
+    const { rows: oldActs } = await client.query('SELECT id, name FROM fund_activities WHERE fund_code = $1', [f.code]);
+    const oldId = new Map(oldActs.map((r) => [r.name, r.id]));
+    const keepNames = acts.map((a) => a.name);
+    await client.query('DELETE FROM fund_activities WHERE fund_code = $1 AND NOT (name = ANY($2::text[]))', [f.code, keepNames]);
+    for (const a of acts) {
+      const vals = [a.items_mode, JSON.stringify(a.icd10_codes), a.icd10_scope, a.sort_order, a.is_active];
+      let id = oldId.get(a.name);
+      if (id) {
+        await client.query(
+          'UPDATE fund_activities SET items_mode = $1, icd10_codes = $2, icd10_scope = $3, sort_order = $4, is_active = $5 WHERE id = $6',
+          [...vals, id]);
+        await client.query('DELETE FROM fund_activity_items WHERE activity_id = $1', [id]);
+      } else {
+        ({ rows: [{ id }] } = await client.query(
+          `INSERT INTO fund_activities (fund_code, name, items_mode, icd10_codes, icd10_scope, sort_order, is_active)
+           VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`, [f.code, a.name, ...vals]));
+      }
+      const row = { id };
+      for (const it of a.items) {
+        await client.query(
+          `INSERT INTO fund_activity_items (activity_id, icode, item_name, source, created_at)
+           VALUES ($1, $2, $3, $4, COALESCE($5, now()))`,
+          [row.id, it.icode, it.item_name, it.source, oldAt.get(it.icode) || null]);
+      }
+    }
     return f;
   }).catch((err) => {
     if (err.code === '23505') throw new HttpError(409, 'มีรหัสกองทุนนี้แล้ว');
     throw err;
   });
   await audit(req, originalCode ? 'fund_update' : 'fund_create', {
-    code: saved.code, items: saved.items.length, pttypes: saved.pttypes, hipdata_codes: saved.hipdataCodes,
+    code: saved.code, items: saved.items.length, activities: saved.activities.map((a) => a.name), pttypes: saved.pttypes, hipdata_codes: saved.hipdataCodes,
   });
   res.status(originalCode ? 200 : 201).json({ code: saved.code });
 }

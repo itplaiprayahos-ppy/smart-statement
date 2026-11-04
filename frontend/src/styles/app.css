@@ -584,3 +584,8 @@ th.sortable .th-sort:focus-visible { outline: 2px solid var(--cr-accent); outlin
 .src-names .warn { color: #8a6100; font-weight: 600; }
 .src-issue { font-size: 0.74rem; color: #8a6100; margin-top: 0.1rem; white-space: normal; }
 .strip-head { font-size: 0.78rem; font-weight: 600; color: var(--cr-muted, #6b7775); min-width: 6.5rem; }
+/* กิจกรรมย่อยของกองทุน */
+.act-card { border: 1px solid var(--cr-line); border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 0.75rem; background: #fbfcfc; }
+.act-card.off { opacity: 0.6; }
+.act-no { width: 1.6rem; height: 1.6rem; border-radius: 50%; background: var(--cr-primary); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 600; flex-shrink: 0; }
+.act-results { max-height: 220px; overflow-y: auto; }

@@ -51,6 +51,7 @@ async function dataVersion() {
       (SELECT MAX(id) FROM import_batches), (SELECT COUNT(*) FROM import_batches),
       (SELECT MAX(id) FROM his_pull_logs),
       (SELECT MAX(updated_at) FROM funds), (SELECT MAX(created_at) FROM fund_items), (SELECT COUNT(*) FROM fund_items),
+      (SELECT MAX(created_at) FROM fund_activity_items), (SELECT COUNT(*) FROM fund_activity_items),
       (SELECT MAX(updated_at) FROM users)
     ) AS v`);
   return rows[0].v;
