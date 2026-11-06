@@ -128,6 +128,7 @@ function readFund(body = {}) {
   return {
     activities,
     code, name, cols, items, pttypes, hipdataCodes, targets, trackOnly: body.track_only === true,
+    stmRequired: body.stm_required === true,
     matchMode: ['rights', 'icd'].includes(body.match_mode) ? body.match_mode : 'items',
     // แบบสิทธิการรักษาไม่ใช้รหัสโรค
     icd10Codes: body.match_mode === 'rights' ? [] : readIcd10(body.icd10_codes),
@@ -145,21 +146,21 @@ async function saveFund(req, res, originalCode) {
       const { rowCount } = await client.query(
         `UPDATE funds SET code = $1, name = $2, stm_columns = $3, sort_order = $4, is_active = $5, pttypes = $7,
            target_send = $8, target_success = $9, target_complete = $10, hipdata_codes = $11, track_only = $12,
-           match_mode = $13, icd10_codes = $14, icd10_scope = $15, updated_at = now()
+           match_mode = $13, icd10_codes = $14, icd10_scope = $15, stm_required = $16, updated_at = now()
          WHERE code = $6`,
         [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, originalCode, JSON.stringify(f.pttypes),
           f.targets.send, f.targets.success, f.targets.complete, JSON.stringify(f.hipdataCodes), f.trackOnly, f.matchMode,
-          JSON.stringify(f.icd10Codes), f.icd10Scope],
+          JSON.stringify(f.icd10Codes), f.icd10Scope, f.stmRequired],
       );
       if (!rowCount) throw new HttpError(404, 'ไม่พบกองทุน');
     } else {
       await client.query(
         `INSERT INTO funds (code, name, stm_columns, sort_order, is_active, pttypes, target_send, target_success,
-           target_complete, hipdata_codes, track_only, match_mode, icd10_codes, icd10_scope)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+           target_complete, hipdata_codes, track_only, match_mode, icd10_codes, icd10_scope, stm_required)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
         [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, JSON.stringify(f.pttypes),
           f.targets.send, f.targets.success, f.targets.complete, JSON.stringify(f.hipdataCodes), f.trackOnly, f.matchMode,
-          JSON.stringify(f.icd10Codes), f.icd10Scope],
+          JSON.stringify(f.icd10Codes), f.icd10Scope, f.stmRequired],
       );
     }
     // แทนที่รายการ แต่คงเวลาเพิ่มเดิมไว้ เพื่อให้รู้ว่ารายการไหนเพิ่มใหม่หลังดึง HOSxP

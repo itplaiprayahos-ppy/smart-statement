@@ -7,8 +7,10 @@ import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
 import { thaiDateTime } from '../utils/format.js';
 
 const SEP = ' | ';
+/** ประเภทไฟล์: REP (e-Claim) · STM (Statement ยืนยันการโอนเงิน) · OLD (Statement รุ่นเก่า เลิกใช้) */
+const FILE_TYPE_LABEL = { REP: 'REP', STM: 'Statement', OLD: 'Statement รุ่นเก่า' };
 const emptyForm = (fields) => ({
-  id: null, name: '', claim_type: 'OPD', header_row: '', sheet_name: '', is_active: true,
+  id: null, name: '', claim_type: 'OPD', file_type: 'REP', header_row: '', sheet_name: '', is_active: true,
   aliases: Object.fromEntries(Object.keys(fields).map((k) => [k, ''])),
 });
 
@@ -32,7 +34,7 @@ export default function MappingsPage() {
     const f = emptyForm(fields);
     if (m) {
       Object.assign(f, {
-        id: m.id, name: m.name, claim_type: m.claim_type, header_row: m.header_row ?? '',
+        id: m.id, name: m.name, claim_type: m.claim_type, file_type: m.file_type || 'REP', header_row: m.header_row ?? '',
         sheet_name: m.sheet_name ?? '', is_active: m.is_active,
       });
       Object.entries(m.mapping).forEach(([k, v]) => { f.aliases[k] = (Array.isArray(v) ? v : [v]).join(SEP); });
@@ -47,7 +49,7 @@ export default function MappingsPage() {
       if (list.length) mapping[k] = list;
     });
     const body = {
-      name: form.name, claim_type: form.claim_type, header_row: form.header_row || null,
+      name: form.name, claim_type: form.claim_type, file_type: form.file_type, header_row: form.header_row || null,
       sheet_name: form.sheet_name || null, is_active: form.is_active, mapping,
     };
     setBusy(true);
@@ -92,11 +94,12 @@ export default function MappingsPage() {
       <div className="panel">
         <div className="table-wrap">
           <table className="table table-hover data-table">
-            <thead><tr><SortTh k="name" sort={mapSort.sort} onSort={mapSort.toggle}>ชื่อ</SortTh><SortTh k="claim_type" sort={mapSort.sort} onSort={mapSort.toggle}>ประเภท</SortTh><SortTh k="header_row" sort={mapSort.sort} onSort={mapSort.toggle}>แถวหัวตาราง</SortTh><SortTh k="is_active" sort={mapSort.sort} onSort={mapSort.toggle}>สถานะ</SortTh><SortTh k="updated_at" sort={mapSort.sort} onSort={mapSort.toggle}>แก้ไขล่าสุด</SortTh><th /></tr></thead>
+            <thead><tr><SortTh k="name" sort={mapSort.sort} onSort={mapSort.toggle}>ชื่อ</SortTh><SortTh k="file_type" sort={mapSort.sort} onSort={mapSort.toggle}>ไฟล์</SortTh><SortTh k="claim_type" sort={mapSort.sort} onSort={mapSort.toggle}>ประเภท</SortTh><SortTh k="header_row" sort={mapSort.sort} onSort={mapSort.toggle}>แถวหัวตาราง</SortTh><SortTh k="is_active" sort={mapSort.sort} onSort={mapSort.toggle}>สถานะ</SortTh><SortTh k="updated_at" sort={mapSort.sort} onSort={mapSort.toggle}>แก้ไขล่าสุด</SortTh><th /></tr></thead>
             <tbody>
               {mapSort.sorted.map((m) => (
                 <tr key={m.id}>
                   <td>{m.name}</td>
+                  <td>{FILE_TYPE_LABEL[m.file_type] || m.file_type}</td>
                   <td>{m.claim_type}</td>
                   <td>{m.header_row ?? <span className="muted">ค้นหาอัตโนมัติ</span>}</td>
                   <td>{m.is_active ? 'ใช้งาน' : <span className="muted">ปิดใช้งาน</span>}</td>
@@ -129,9 +132,16 @@ export default function MappingsPage() {
         {form && (
           <>
             <div className="row g-3 mb-3">
-              <div className="col-md-6">
+              <div className="col-md-4">
                 <label className="form-label" htmlFor="mn">ชื่อรูปแบบ</label>
                 <input id="mn" className="form-control" value={form.name} onChange={setF('name')} />
+              </div>
+              <div className="col-md-2">
+                <label className="form-label" htmlFor="mf">ไฟล์</label>
+                <select id="mf" className="form-select" value={form.file_type} onChange={setF('file_type')}>
+                  <option value="REP">REP</option><option value="STM">Statement</option>
+                  {form.file_type === 'OLD' && <option value="OLD">Statement รุ่นเก่า</option>}
+                </select>
               </div>
               <div className="col-md-2">
                 <label className="form-label" htmlFor="mt">ประเภท</label>
@@ -152,6 +162,11 @@ export default function MappingsPage() {
             <p className="small muted mb-2">
               ใส่ชื่อหัวคอลัมน์ตามที่ปรากฏในไฟล์ ถ้ามีได้หลายชื่อให้คั่นด้วยเครื่องหมาย | ระบบไม่สนใจตัวพิมพ์เล็กใหญ่และช่องว่าง
             </p>
+            {form.file_type === 'STM' && (
+              <p className="small text-primary-emphasis mb-2">
+                Statement เชื่อมกับ REP ด้วย TRAN_ID (ต้องกำหนด) ยอด “ยอดชดเชย” ใช้เป็นโอนจริง (STM) ถ้าใส่ชื่อหัวกลุ่ม เช่น ชดเชยสุทธิ ระบบรวมทุกคอลัมน์ย่อยให้
+              </p>
+            )}
             <table className="table table-sm align-middle">
               <tbody>
                 {Object.entries(fields).map(([k, def]) => (

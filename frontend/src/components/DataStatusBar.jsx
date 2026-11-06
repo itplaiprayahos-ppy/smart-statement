@@ -37,6 +37,13 @@ export default function DataStatusBar() {
         <strong>REP</strong>{' '}
         {st.rep.at ? <>นำเข้า {shortDate(st.rep.at)} <span className="sub">ข้อมูลถึง {shortDate(st.rep.maxDate)}</span></> : <span className="sub">ยังไม่มี</span>}
       </span>
+      {st.stm?.at && (
+        <span className="item" title="นำเข้าไฟล์ Statement ล่าสุด / วันที่รับบริการล่าสุดใน Statement">
+          <i className="bi bi-bank" aria-hidden="true" />
+          <strong>Statement</strong>{' '}
+          นำเข้า {shortDate(st.stm.at)} <span className="sub">ข้อมูลถึง {shortDate(st.stm.maxDate)}</span>
+        </span>
+      )}
       <span className="item" title="ดึงข้อมูล HOSxP ล่าสุด / วันที่ล่าสุดที่ดึงแล้ว">
         <i className="bi bi-hospital" aria-hidden="true" />
         <strong>HOSxP</strong>{' '}

@@ -59,6 +59,30 @@ export function repPeriodOf(repNo) {
   return m ? `${2500 + Number(m[1]) - 543}-${m[2]}-01` : null;
 }
 
+/**
+ * เลขที่เอกสารของไฟล์ Statement (e-Claim Invoice) เช่น "เลขที่เอกสาร eclaim_11344_OPCS_25690811_191032713"
+ * หรือชื่อไฟล์ eclaim_11344_OPCS_25690811_191032713.xls -> { doc, date: '2026-08-11' }
+ * ถ้าไม่ใช่รูปแบบนี้ ใช้รูปแบบเลขเอกสาร STM เดิม (เช่น OPUCS256908-01)
+ */
+export function statementDocOf(rows, headerIdx, fileName) {
+  const pick = (s) => {
+    const m = String(s ?? '').match(/eclaim_[0-9A-Za-z]+_[A-Za-z]+_[0-9]{8}_[0-9]+/i);
+    return m ? m[0] : null;
+  };
+  let doc = null;
+  for (const row of rows.slice(0, Math.max(0, headerIdx))) {
+    const line = (row || []).filter((v) => v !== null && v !== undefined).join(' ');
+    if (/เลขที่เอกสาร/.test(line)) {
+      doc = pick(line) || normalizeStmDoc(line.replace(/.*เลขที่เอกสาร/, ''));
+      if (doc) break;
+    }
+  }
+  doc = doc || pick(fileName) || normalizeStmDoc(fileName);
+  const d = String(doc ?? '').match(/_(25\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])_/);
+  const date = d ? `${Number(d[1]) - 543}-${d[2]}-${d[3]}` : stmPeriodOf(doc);
+  return { doc, date };
+}
+
 /** หาเลขเอกสารจากหัวรายงานเหนือตาราง ถ้าไม่พบใช้ชื่อไฟล์ */
 function findStmDoc(rows, headerIdx, fileName) {
   for (const row of rows.slice(0, Math.max(0, headerIdx))) {
@@ -309,7 +333,10 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
 
   const missingRequired = Object.entries(FIELD_DEFS)
     .filter(([k, d]) => d.required && colIndex[k] === undefined).map(([k]) => FIELD_DEFS[k].label);
-  if (colIndex.tran_id === undefined && colIndex.rep_no === undefined) missingRequired.push('TRAN_ID หรือ เลข REP');
+  const isStm = profile.file_type === 'STM';
+  // Statement เชื่อมกับ REP ด้วย TRAN_ID จึงต้องมีคอลัมน์ TRAN_ID เสมอ
+  if (isStm && colIndex.tran_id === undefined) missingRequired.push('TRAN_ID');
+  else if (colIndex.tran_id === undefined && colIndex.rep_no === undefined) missingRequired.push('TRAN_ID หรือ เลข REP');
 
   // คอลัมน์ยอดที่ได้รับของแต่ละกองทุน
   const fundCols = {};
@@ -325,8 +352,9 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
     fundColumns[f.code] = { matched: matched.map((c) => c.label), missing };
   }
 
-  const stmDoc = findStmDoc(rows, headerIdx, fileName);
-  const stmPeriod = stmPeriodOf(stmDoc);
+  const stmInfo = isStm ? statementDocOf(rows, headerIdx, fileName) : null;
+  const stmDoc = isStm ? stmInfo.doc : findStmDoc(rows, headerIdx, fileName);
+  const stmPeriod = isStm ? stmInfo.date : stmPeriodOf(stmDoc);
 
   const result = {
     stmDoc,
@@ -424,6 +452,7 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
     const comp = sumMoney('compensated');
     if (claim.error) problems.push('ยอดเรียกเก็บไม่ใช่ตัวเลข');
     if (comp.error) problems.push('ยอดชดเชยไม่ใช่ตัวเลข');
+    if (isStm && !tranId) problems.push('ไม่มี TRAN_ID (ใช้เชื่อมกับ REP)');
 
     const fundAmounts = {};
     for (const [code, idxs] of Object.entries(fundCols)) {

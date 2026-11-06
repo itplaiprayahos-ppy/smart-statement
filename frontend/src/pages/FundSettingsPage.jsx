@@ -16,7 +16,7 @@ const MATCH_MODES = [
 
 const blankFund = () => ({
   originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], activities: [], pttypes: [],
-  hipdata_codes: ['UCS'], target_send: 95, target_success: 90, target_complete: 95, track_only: false,
+  hipdata_codes: ['UCS'], target_send: 95, target_success: 90, target_complete: 95, track_only: false, stm_required: false,
   match_mode: 'items', icd10Text: '', icd10_scope: 'any',
 });
 
@@ -200,6 +200,7 @@ export default function FundSettingsPage() {
         pttypes: legacyGroups && pttypeList.length ? codesOf(legacyGroups) : (data.pttypes || []),
         hipdata_codes: legacyGroups && !pttypeList.length ? legacyGroups : [],
         track_only: !!data.track_only,
+        stm_required: !!data.stm_required,
         match_mode: data.match_mode || 'items',
         icd10Text: (data.icd10_codes || []).join(', '),
         icd10_scope: data.icd10_scope || 'any',
@@ -258,6 +259,7 @@ export default function FundSettingsPage() {
       // รายการรหัสสิทธิเป็นตัวกำหนด (ไม่ใช้กลุ่มสิทธิแล้ว) ยกเว้นยังโหลดรายการสิทธิจาก HOSxP ไม่ได้
       hipdata_codes: pttypeList.length ? [] : form.hipdata_codes,
       track_only: form.track_only,
+      stm_required: form.stm_required,
       match_mode: form.match_mode,
       icd10_codes: form.match_mode === 'rights' ? [] : parseIcd(form.icd10Text),
       icd10_scope: form.icd10_scope,
@@ -322,7 +324,8 @@ export default function FundSettingsPage() {
                     {f.track_only ? 'ติดตามยอดรับ' : f.match_mode === 'rights' ? 'คัดตามสิทธิ' : f.match_mode === 'icd' ? 'คัดตาม ICD-10' : f.activities?.length ? `${f.activities.length} กิจกรรม` : f.item_count ? `${f.item_count} รายการ` : 'ยังไม่มีรายการ'}
                   </span>
                 </div>
-                <div className="small">{f.name}{!f.is_active && <span className="muted"> (ปิดใช้งาน)</span>}</div>
+                <div className="small">{f.name}{!f.is_active && <span className="muted"> (ปิดใช้งาน)</span>}
+                  {f.stm_required && <span className="badge text-bg-info ms-1" title="ตรวจการโอนเงินจริงจากไฟล์ Statement">Statement</span>}</div>
                 {!f.track_only && (
                   <div className="small-id">
                     {f.pttypes?.length ? `${f.pttypes.length} รหัสสิทธิ` : f.hipdata_codes?.length ? `กลุ่ม ${f.hipdata_codes.join(', ')}` : 'ทุกสิทธิ'}
@@ -387,6 +390,15 @@ export default function FundSettingsPage() {
                         ติดตามยอดรับอย่างเดียว <span className="small muted">(ไม่ต้องตั้งรายการและสิทธิ นับเฉพาะยอดที่ได้รับจาก REP เช่น FS, DRUG)</span>
                       </label>
                     </div>
+                    {!form.track_only && (
+                    <div className="form-check mb-1">
+                      <input id="fs-stm" type="checkbox" className="form-check-input" checked={form.stm_required}
+                        onChange={(e) => update({ stm_required: e.target.checked })} />
+                      <label className="form-check-label" htmlFor="fs-stm">
+                        ต้องมี Statement <span className="small muted">(ตรวจว่าได้รับโอนเงินจริงจากไฟล์ Statement เช่น OFC แสดงเป็นขั้น “ได้รับโอนจริง” ในหน้ารายชื่อคนไข้)</span>
+                      </label>
+                    </div>
+                    )}
                     <div className="form-check">
                       <input id="fs-active" type="checkbox" className="form-check-input" checked={form.is_active} onChange={(e) => update({ is_active: e.target.checked })} />
                       <label className="form-check-label" htmlFor="fs-active">เปิดใช้งานกองทุนนี้</label>

@@ -199,7 +199,16 @@ export function BoxReason({ items }) {
 }
 
 /* ---------- ประวัติอัปโหลด (ทุกชนิดรวมกัน) ---------- */
-export function UploadHistory({ uploads, onRemove }) {
+/** ตัวเลขผลเทียบของไฟล์ทะเบียน กดแล้วกรองรายชื่อ (ถ้ามี onFilter) */
+function SumCell({ n, tone, onClick, title }) {
+  if (n === undefined || n === null) return <span className="muted">–</span>;
+  const cls = n > 0 && tone ? `text-${tone}` : n > 0 ? '' : 'muted';
+  return onClick && n > 0
+    ? <button type="button" className={`btn btn-link btn-sm p-0 ${cls}`} title={title} onClick={onClick}>{int(n)}</button>
+    : <span className={cls}>{int(n)}</span>;
+}
+
+export function UploadHistory({ uploads, onRemove, onFilter }) {
   const { user, isAdmin } = useAuth();
   const [show, setShow] = useState(false);
   const s = useSort(uploads, { key: 'created_at', dir: 'desc' });
@@ -217,7 +226,12 @@ export function UploadHistory({ uploads, onRemove }) {
                 <SortTh k="target_name" sort={s.sort} onSort={s.toggle}>ทะเบียน</SortTh>
                 <SortTh k="file_name" sort={s.sort} onSort={s.toggle}>ไฟล์</SortTh>
                 <SortTh k="date_from" sort={s.sort} onSort={s.toggle}>ช่วงวันที่</SortTh>
-                <SortTh k="current_rows" sort={s.sort} onSort={s.toggle} className="num">ใช้อยู่</SortTh>
+                <SortTh k="current_rows" sort={s.sort} onSort={s.toggle} className="num">แถวที่ใช้อยู่</SortTh>
+                <th className="num" title="จำนวนคนในทะเบียน (คนเดียวกันหลายวันนับแยกวัน)">คน</th>
+                <th className="num">พบใน HOSxP</th>
+                <th className="num">ไม่พบใน HOSxP</th>
+                <th className="num">ยอดไม่ตรง</th>
+                <th className="num" title="HOSxP มีค่าใช้จ่ายของห้องนี้ในช่วงวันที่ของไฟล์ แต่ไม่อยู่ในทะเบียน">ไม่อยู่ในทะเบียน</th>
                 <SortTh k="uploaded_by_name" sort={s.sort} onSort={s.toggle}>ผู้อัปโหลด</SortTh>
                 <th />
               </tr>
@@ -230,6 +244,11 @@ export function UploadHistory({ uploads, onRemove }) {
                   <td>{b.file_name}</td>
                   <td className="text-nowrap">{thaiDate(b.date_from)} – {thaiDate(b.date_to)}</td>
                   <td className="num">{b.current_rows ? int(b.current_rows) : <span className="muted">ถูกแทนที่</span>}</td>
+                  <td className="num"><SumCell n={b.summary?.persons} onClick={onFilter && (() => onFilter(b, {}))} title="ดูคนในทะเบียนไฟล์นี้" /></td>
+                  <td className="num"><SumCell n={b.summary?.found} tone="success" /></td>
+                  <td className="num"><SumCell n={b.summary?.not_found} tone="danger" onClick={onFilter && (() => onFilter(b, { drop: 1 }))} title="ดูรายชื่อที่ไม่พบใน HOSxP" /></td>
+                  <td className="num"><SumCell n={b.summary?.diff} tone="warning-emphasis" onClick={onFilter && (() => onFilter(b, { problem: 'REG_DIFF' }))} title="ดูรายชื่อที่ยอดไม่ตรง" /></td>
+                  <td className="num"><SumCell n={b.summary?.not_in_reg} tone="warning-emphasis" onClick={onFilter && (() => onFilter(b, { problem: 'NOT_IN_REG' }))} title="ดูรายชื่อที่ไม่อยู่ในทะเบียน" /></td>
                   <td>{b.uploaded_by_name || '–'}</td>
                   <td className="text-end">
                     {(isAdmin || b.uploaded_by === user.id) && (
@@ -240,7 +259,7 @@ export function UploadHistory({ uploads, onRemove }) {
                   </td>
                 </tr>
               ))}
-              {uploads.length === 0 && <tr><td colSpan={7} className="muted text-center">ยังไม่มีการอัปโหลด</td></tr>}
+              {uploads.length === 0 && <tr><td colSpan={12} className="muted text-center">ยังไม่มีการอัปโหลด</td></tr>}
             </tbody>
           </table>
         </div>

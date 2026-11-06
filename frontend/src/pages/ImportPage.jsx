@@ -32,7 +32,11 @@ function rowRanges(nums) {
 
 export default function ImportPage() {
   const { isAdmin } = useAuth();
-  const [mappings, setMappings] = useState([]);
+  const [allMappings, setAllMappings] = useState([]);
+  // ประเภทไฟล์: REP (ผลการส่งเบิก e-Claim) หรือ STM (Statement ยืนยันการโอนเงินจริง)
+  const [fileType, setFileType] = useState('REP');
+  const mappings = allMappings.filter((m) => (m.file_type || 'REP') === fileType);
+  const isStm = fileType === 'STM';
   const [fields, setFields] = useState({});
   const [mappingId, setMappingId] = useState('');
   // ไฟล์ที่เลือก: { id, file, status, preview, result, error }
@@ -61,7 +65,7 @@ export default function ImportPage() {
 
   const removeLegacy = async () => {
     const ok = await confirmAction({
-      title: 'ลบข้อมูล Statement เดิมทั้งหมด?',
+      title: 'ลบข้อมูล Statement รุ่นเก่าทั้งหมด?',
       text: `ไฟล์ Statement ${int(legacy.batches)} ไฟล์ (${int(legacy.lines)} รายการ) จะถูกลบถาวร ระบบจะใช้ข้อมูลจาก REP อย่างเดียว`,
       confirmText: 'ลบข้อมูล Statement',
       danger: true,
@@ -80,10 +84,11 @@ export default function ImportPage() {
   useEffect(() => {
     Promise.all([api.get('/mappings', { params: { active: 1 } }), api.get('/mappings/fields')])
       .then(([m, f]) => {
-        const opd = m.data.filter((x) => x.claim_type === 'OPD');
-        setMappings(opd);
+        const opd = m.data.filter((x) => x.claim_type === 'OPD' && ['REP', 'STM'].includes(x.file_type || 'REP'));
+        setAllMappings(opd);
         setFields(f.data);
-        if (opd[0]) setMappingId(String(opd[0].id));
+        const first = opd.find((x) => (x.file_type || 'REP') === 'REP');
+        if (first) setMappingId(String(first.id));
       })
       .catch(showError);
     loadHistory();
@@ -199,13 +204,24 @@ export default function ImportPage() {
   };
 
   const sampleCols = ['rep_no', 'tran_id', 'hn', 'pid', 'patient_name', 'service_date', 'claim_amount', 'compensated', 'error_code'];
+  // ชื่อยอดเงินตามประเภทไฟล์ (Statement: ชดเชยสุทธิ = โอนจริง (STM))
+  const fieldLabel = (k) => (isStm && k === 'compensated' ? 'โอนจริง (STM)' : fields[k]?.label);
+  const docLabel = isStm ? 'เลขที่เอกสาร STM' : 'เลขที่ REP';
+  const pickType = (t) => {
+    if (busy || t === fileType) return;
+    setFileType(t);
+    const first = allMappings.find((m) => (m.file_type || 'REP') === t);
+    setMappingId(first ? String(first.id) : '');
+    setItems((l) => l.filter((x) => x.status === 'done').concat(l.filter((x) => x.status !== 'done').map((x) => ({ ...x, status: 'pending', preview: null }))));
+    setSelected(null);
+  };
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>นำเข้าไฟล์ สปสช.</h1>
-          <p>ไฟล์ REP ที่ดาวน์โหลดจาก e-Claim (.xls, .xlsx) ชีต Detail ระบบจะตรวจไฟล์ให้ดูก่อนบันทึก</p>
+          <p>ไฟล์ REP (ผลการส่งเบิก) และ Statement (ยืนยันการโอนเงินจริง) ที่ดาวน์โหลดจาก e-Claim (.xls, .xlsx) ชีต Detail ระบบจะตรวจไฟล์ให้ดูก่อนบันทึก</p>
         </div>
       </div>
 
@@ -213,11 +229,11 @@ export default function ImportPage() {
         <div className="alert alert-warning d-flex flex-wrap align-items-center gap-2">
           <i className="bi bi-exclamation-triangle" />
           <span className="me-auto">
-            ยังมีข้อมูลจากไฟล์ Statement เดิม {int(legacy.batches)} ไฟล์ ({int(legacy.lines)} รายการ)
+            ยังมีข้อมูลจากไฟล์ Statement รุ่นเก่า (ก่อนใช้ REP) {int(legacy.batches)} ไฟล์ ({int(legacy.lines)} รายการ)
             ถ้าใช้คู่กับ REP ยอดที่ได้รับจะถูกนับซ้ำ ควรลบออกก่อนนำเข้า REP
           </span>
           {isAdmin && (
-            <button type="button" className="btn btn-sm btn-danger" onClick={removeLegacy}>ลบข้อมูล Statement เดิม</button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={removeLegacy}>ลบข้อมูล Statement รุ่นเก่า</button>
           )}
         </div>
       )}
@@ -225,10 +241,24 @@ export default function ImportPage() {
       <div className="panel">
         <div className="row g-3 align-items-end">
           <div className="col-lg-4">
+            <div className="form-label">ประเภทไฟล์</div>
+            <div className="btn-group w-100 mb-3" role="group" aria-label="ประเภทไฟล์">
+              {[['REP', 'REP', 'bi-cloud-check'], ['STM', 'Statement', 'bi-bank']].map(([t, label, icon]) => (
+                <button key={t} type="button" className={`btn ${fileType === t ? 'btn-primary' : 'btn-outline-primary'}`}
+                  aria-pressed={fileType === t} disabled={busy} onClick={() => pickType(t)}>
+                  <i className={`bi ${icon} me-1`} />{label}
+                </button>
+              ))}
+            </div>
+            <div className="small muted mb-2">
+              {isStm
+                ? 'Statement ยืนยันว่ารายการที่ส่งเบิกได้รับโอนเงินจริง ระบบเชื่อมกับ REP ด้วย TRAN_ID'
+                : 'REP คือผลการส่งเบิกจาก e-Claim (ผ่าน/ติด C และยอดชดเชยรายกองทุน)'}
+            </div>
             <label className="form-label" htmlFor="mapping">รูปแบบไฟล์</label>
             <select id="mapping" className="form-select" value={mappingId} disabled={busy}
               onChange={(e) => { setMappingId(e.target.value); setItems((l) => l.map((x) => ({ ...x, status: x.status === 'done' ? 'done' : 'pending', preview: null }))); setSelected(null); }}>
-              {mappings.length === 0 && <option value="">ยังไม่มีรูปแบบไฟล์ OPD</option>}
+              {mappings.length === 0 && <option value="">ยังไม่มีรูปแบบไฟล์ {isStm ? 'Statement' : 'REP'} (เพิ่มได้ที่หน้ารูปแบบไฟล์ Excel)</option>}
               {mappings.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
@@ -257,7 +287,7 @@ export default function ImportPage() {
             <table className="table table-sm table-hover data-table clickable mb-0">
               <thead>
                 <tr>
-                  <SortTh k="name" sort={fileSort.sort} onSort={fileSort.toggle}>ไฟล์</SortTh><SortTh k="rep" sort={fileSort.sort} onSort={fileSort.toggle}>เลขที่ REP</SortTh><SortTh k="rows" sort={fileSort.sort} onSort={fileSort.toggle} className="num">แถว</SortTh><SortTh k="valid" sort={fileSort.sort} onSort={fileSort.toggle} className="num">นำเข้าได้</SortTh>
+                  <SortTh k="name" sort={fileSort.sort} onSort={fileSort.toggle}>ไฟล์</SortTh><SortTh k="rep" sort={fileSort.sort} onSort={fileSort.toggle}>{docLabel}</SortTh><SortTh k="rows" sort={fileSort.sort} onSort={fileSort.toggle} className="num">แถว</SortTh><SortTh k="valid" sort={fileSort.sort} onSort={fileSort.toggle} className="num">นำเข้าได้</SortTh>
                   <SortTh k="errors" sort={fileSort.sort} onSort={fileSort.toggle} className="num">มีปัญหา</SortTh><SortTh k="status" sort={fileSort.sort} onSort={fileSort.toggle}>สถานะ</SortTh><th />
                 </tr>
               </thead>
@@ -334,9 +364,12 @@ export default function ImportPage() {
             <button type="button" className="btn btn-sm btn-link" onClick={() => setSelected(null)}>ปิด</button>
           </div>
           <p className="muted mb-3">
-            {preview.stmDoc
-              ? <>เลขที่ REP <strong>{preview.stmDoc}</strong>{preview.stmPeriod && ` (${thaiMonth(preview.stmPeriod.slice(0, 7))})`}, </>
-              : <span className="text-warning-emphasis">ไม่พบเลขที่ REP (รายการจะไม่แยกตามรอบ), </span>}
+            {preview.fileType === 'STM' ? (preview.stmDoc
+              ? <>เลขที่เอกสาร STM <strong>{preview.stmDoc}</strong>{preview.stmPeriod && ` (งวดวันที่ ${thaiDate(preview.stmPeriod)})`}, </>
+              : <span className="text-warning-emphasis">ไม่พบเลขที่เอกสาร STM (นำเข้าซ้ำจะทับรายการเดิมที่ TRAN_ID เดียวกัน), </span>)
+              : preview.stmDoc
+                ? <>เลขที่ REP <strong>{preview.stmDoc}</strong>{preview.stmPeriod && ` (${thaiMonth(preview.stmPeriod.slice(0, 7))})`}, </>
+                : <span className="text-warning-emphasis">ไม่พบเลขที่ REP (รายการจะไม่แยกตามรอบ), </span>}
             ชีต “{preview.sheetName}” หัวตารางอยู่แถวที่ {preview.headerRowNumber}:
             พบ {int(preview.totalRows)} แถว นำเข้าได้ {int(preview.validRows)} แถว
             {preview.errorCount > 0 && <>, <span className="text-danger">มีปัญหา {int(preview.errorCount)} แถว</span></>}
@@ -375,7 +408,7 @@ export default function ImportPage() {
                 <tbody>
                   {Object.entries(fields).map(([key, def]) => (
                     <tr key={key}>
-                      <td>{def.label}{def.required && <span className="text-danger"> *</span>}</td>
+                      <td>{fieldLabel(key)}{(def.required || (preview.fileType === 'STM' && key === 'tran_id')) && <span className="text-danger"> *</span>}</td>
                       <td className={preview.matchedColumns[key] ? '' : 'muted'}>{preview.matchedColumns[key] || 'ไม่พบ'}</td>
                     </tr>
                   ))}
@@ -394,7 +427,7 @@ export default function ImportPage() {
                   </div>
                 </div>
               )}
-              {preview.fundColumns && Object.keys(preview.fundColumns).length > 0 && (
+              {preview.fileType !== 'STM' && preview.fundColumns && Object.keys(preview.fundColumns).length > 0 && (
                 <div className="mb-3">
                   <div className="fw-medium mb-2">คอลัมน์ยอดที่ได้รับรายกองทุน</div>
                   <div className="table-wrap">
@@ -415,7 +448,7 @@ export default function ImportPage() {
               <div className="fw-medium mb-2">ตัวอย่าง 10 แถวแรก</div>
               <div className="table-wrap">
                 <table className="table table-sm data-table">
-                  <thead><tr>{sampleCols.map((c) => <th key={c}>{fields[c]?.label}</th>)}</tr></thead>
+                  <thead><tr>{sampleCols.map((c) => <th key={c}>{fieldLabel(c)}</th>)}</tr></thead>
                   <tbody>
                     {preview.sample.map((r) => (
                       <tr key={r.row_number}>
@@ -443,7 +476,7 @@ export default function ImportPage() {
             <table className="table table-hover data-table">
               <thead>
                 <tr>
-                  <SortTh k="created_at" sort={histSort.sort} onSort={histSort.toggle}>เวลา</SortTh><SortTh k="file_name" sort={histSort.sort} onSort={histSort.toggle}>ไฟล์</SortTh><SortTh k="stm_doc" sort={histSort.sort} onSort={histSort.toggle}>เลขที่ REP</SortTh><SortTh k="period" sort={histSort.sort} onSort={histSort.toggle}>ช่วงวันที่ในไฟล์</SortTh>
+                  <SortTh k="created_at" sort={histSort.sort} onSort={histSort.toggle}>เวลา</SortTh><SortTh k="file_name" sort={histSort.sort} onSort={histSort.toggle}>ไฟล์</SortTh><SortTh k="stm_doc" sort={histSort.sort} onSort={histSort.toggle}>เลขที่ REP / STM</SortTh><SortTh k="period" sort={histSort.sort} onSort={histSort.toggle}>ช่วงวันที่ในไฟล์</SortTh>
                   <SortTh k="inserted" sort={histSort.sort} onSort={histSort.toggle} className="num">เพิ่มใหม่</SortTh><SortTh k="updated" sort={histSort.sort} onSort={histSort.toggle} className="num">อัปเดต</SortTh><SortTh k="errors" sort={histSort.sort} onSort={histSort.toggle} className="num">ข้าม</SortTh>
                   <SortTh k="imported_by" sort={histSort.sort} onSort={histSort.toggle}>ผู้นำเข้า</SortTh><th />
                 </tr>
@@ -454,11 +487,18 @@ export default function ImportPage() {
                     <td className="text-nowrap">{thaiDateTime(b.created_at)}</td>
                     <td>
                       {b.file_name}
-                      {b.file_type === 'STM' && <span className="badge text-bg-warning ms-1">Statement เดิม</span>}
+                      {b.file_type === 'OLD' && <span className="badge text-bg-warning ms-1">Statement รุ่นเก่า</span>}
+                      {b.file_type === 'STM' && <span className="badge text-bg-info ms-1">Statement</span>}
                       <div className="small-id">{b.mapping_name}</div>
                     </td>
                     <td>{b.stm_doc || <span className="muted">–</span>}
-                      {b.stm_period && <div className="small-id">{thaiMonth(b.stm_period.slice(0, 7))}</div>}
+                      {b.stm_period && <div className="small-id">{b.file_type === 'STM' ? `งวดวันที่ ${thaiDate(b.stm_period)}` : thaiMonth(b.stm_period.slice(0, 7))}</div>}
+                      {b.file_type === 'STM' && b.current_rows > 0 && (
+                        <div className={`small-id ${b.stm_matched < b.current_rows ? 'text-warning-emphasis' : ''}`}
+                          title="จำนวนรายการที่พบ TRAN_ID เดียวกันใน REP ที่นำเข้าแล้ว">
+                          พบใน REP {int(b.stm_matched)}/{int(b.current_rows)}
+                        </div>
+                      )}
                     </td>
                     <td className="text-nowrap">{b.date_min ? `${thaiDate(b.date_min)} – ${thaiDate(b.date_max)}` : <span className="muted">ถูกแทนที่ด้วยไฟล์ใหม่กว่า</span>}</td>
                     <td className="num">{int(b.inserted_rows)}</td>

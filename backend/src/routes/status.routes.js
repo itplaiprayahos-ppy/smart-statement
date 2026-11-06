@@ -10,6 +10,8 @@ router.get('/', asyncHandler(async (_req, res) => {
     SELECT
       (SELECT MAX(created_at) FROM import_batches WHERE file_type = 'REP') AS rep_at,
       (SELECT MAX(service_date) FROM nhso_lines WHERE claim_type = 'OPD') AS rep_max_date,
+      (SELECT MAX(created_at) FROM import_batches WHERE file_type = 'STM') AS stm_at,
+      (SELECT MAX(service_date) FROM stm_lines WHERE claim_type = 'OPD') AS stm_max_date,
       (SELECT MAX(created_at) FROM his_pull_logs WHERE claim_type = 'OPD') AS his_at,
       (SELECT MAX(date_to) FROM his_pull_logs WHERE claim_type = 'OPD') AS his_max_date,
       (SELECT MAX(created_at) FROM point_registry_batches) AS reg_at,
@@ -30,6 +32,7 @@ router.get('/', asyncHandler(async (_req, res) => {
   const nextDay = (d) => new Date(new Date(d).getTime() + 86400000).toISOString().slice(0, 10);
   res.json({
     rep: { at: r.rep_at, maxDate: r.rep_max_date },
+    stm: { at: r.stm_at, maxDate: r.stm_max_date },
     his: { at: r.his_at, maxDate: r.his_max_date },
     registry: { at: r.reg_at, funds: r.reg_funds },
     // ทะเบียนใหม่กว่าการดึง HOSxP ล่าสุด: รายการใหม่ในทะเบียนอาจยังไม่ถูกดึง

@@ -7,6 +7,9 @@ import PeriodFields from '../components/PeriodFields.jsx';
 import SortTh from '../components/SortTh.jsx';
 import { PointUploadModal } from '../components/RegistryUploads.jsx';
 import { Box, BoxReason, BreakdownTable, DeptPopover, Field, RegistryBox, UploadHistory } from '../components/VisitParts.jsx';
+import DataCoverage from '../components/DataCoverage.jsx';
+import RoomSummary from '../components/RoomSummary.jsx';
+import RegistryTracker from '../components/RegistryTracker.jsx';
 import { useSortState } from '../hooks/useSort.js';
 import { confirmAction, notifySuccess, showError } from '../utils/alert.js';
 import { notifyDataChanged } from '../utils/dataEvents.js';
@@ -14,7 +17,7 @@ import { int, lastMonthRange, money, rangeErrorOf, thaiDate } from '../utils/for
 import { pullHosxpOpd } from '../utils/hosxp.js';
 
 /* =====================================================================
- * รายชื่อคนไข้: คนไข้แต่ละคนไปถึงขั้นไหน (ให้บริการ -> เข้าเกณฑ์ -> ส่งเบิก -> ได้รับเงิน)
+ * รายชื่อคนไข้: คนไข้แต่ละคนไปถึงขั้นไหน (ให้บริการ -> เข้าเกณฑ์ -> ส่งเบิก -> ได้รับเงิน -> ได้รับโอนจริง)
  * และต้องทำอะไรต่อ  หนึ่งแถว = 1 visit ใน 1 กองทุน
  * ===================================================================== */
 const PAGE_SIZE = 50;
@@ -24,22 +27,29 @@ const STEPS = [
   { n: 2, key: 'eligible', label: 'เข้าเกณฑ์เบิก', dot: '#3b5bdb' },
   { n: 3, key: 'sent', label: 'ส่งเบิกแล้ว', dot: '#b26a00' },
   { n: 4, key: 'paid', label: 'ได้รับเงิน', dot: '#2f7d4f' },
+  { n: 5, key: 'stm', label: 'ได้รับโอนจริง', dot: '#0b7285' },
 ];
 /** ปัญหาแบ่ง 2 กลุ่ม: ทะเบียนกับ HOSxP (งานหน้างาน) และการเบิก (งานเคลม) */
 const PROBLEM_GROUPS = [
   { label: 'ทะเบียน', ok: 'ตรงกับ HOSxP ทั้งหมด (หรือยังไม่มีทะเบียนในช่วงนี้)', keys: ['REG_NO_HIS', 'NOT_IN_REG', 'REG_DIFF'] },
-  { label: 'การเบิก', ok: 'ไม่มีปัญหา', keys: ['NO_HIS', 'DENIED', 'NOT_SENT', 'NOT_PAID', 'REP_DIFF', 'EXTRA'] },
+  { label: 'การเบิก', ok: 'ไม่มีปัญหา', keys: ['NO_HIS', 'DENIED', 'NOT_SENT', 'NOT_PAID', 'REP_DIFF', 'STM_NO_REP', 'STM_DIFF', 'EXTRA'] },
 ];
 /** ยอดเงินของแต่ละขั้น (ระดับ visit: ค่าใช้จ่าย / เรียกเก็บ (REP) · ระดับกองทุน: ตั้งเบิก / ได้รับ) */
-const STEP_MONEY = { served: 'ค่าใช้จ่าย', eligible: 'ตั้งเบิก', sent: 'เรียกเก็บ (REP)', paid: 'ได้รับ' };
+/** ขั้นต้นทางเมื่อนับจากทะเบียน */
+const REG_STEP = { n: 0, key: 'registry', label: 'อยู่ในทะเบียน', dot: '#7048e8' };
+/** ตกหล่นที่ขั้นไหน (ตรงกับ DROPS ใน backend) */
+const DROP_LABEL = { 1: 'ไม่พบใน HOSxP', 2: 'ไม่เข้าเกณฑ์กองทุน', 3: 'ยังไม่ส่งเบิก', 4: 'ยังไม่ได้รับเงิน / ติด C', 5: 'รอ Statement' };
+const DROP_OK = { 1: 'พบใน HOSxP ครบ', 2: 'เข้าเกณฑ์ครบ', 3: 'ส่งเบิกครบ', 4: 'ได้รับเงินครบ', 5: 'ได้รับโอนจริงครบ' };
+const STEP_MONEY = { registry: 'ยอดทะเบียน', served: 'ค่าใช้จ่าย', eligible: 'ตั้งเบิก', sent: 'เรียกเก็บ (REP)', paid: 'ได้รับ', stm: 'โอนจริง (STM)' };
 const LEVEL_COLOR = { bad: 'var(--st-denied)', warn: 'var(--st-diff)', info: '#3b5bdb' };
 const pct = (a, b) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '–');
 const list = (v) => (v ? v.split(',').filter(Boolean) : []);
 
 /* ---------- จุด 4 ขั้นของแต่ละแถว ---------- */
 /**
- * พบในแหล่งไหนบ้าง: ทะเบียน · HOSxP · REP
+ * พบในแหล่งไหนบ้าง: ทะเบียน · HOSxP · REP · STM (Statement)
  *  เทา = ไม่มี · เขียว = มี · เหลือง = มีแต่มีเรื่องต้องตรวจ (ดูรายละเอียดเมื่อคลิกแถว)
+ *  STM เส้นประจาง = กองทุนนี้ไม่ต้องใช้ Statement และยังไม่มี Statement
  *  คำนวณจากข้อมูลของแถวเอง (ไม่พึ่งค่าสรุปจากเซิร์ฟเวอร์)
  */
 const REG_PROBLEM = { HIS_DIFF: 'ยอดไม่ตรง HOSxP', NO_VISIT: 'ไม่พบใน HOSxP' };
@@ -55,9 +65,14 @@ function sourcesOf(r) {
       : r.problems.includes('NOT_PAID') ? 'ยังไม่ได้รับเงิน' : null;
   const rep = !r.sent ? { st: 'na', text: 'ไม่มี' }
     : repIssue ? { st: 'warn', text: `มี · ${repIssue}` } : { st: 'ok', text: r.paid ? 'มี · ได้รับเงิน' : 'มี' };
-  return [['ทะเบียน', reg], ['HOSxP', his], ['REP', rep]];
+  const stmIssue = r.problems.includes('STM_NO_REP') ? 'ไม่พบใน REP'
+    : r.problems.includes('STM_DIFF') ? 'ยอดต่างจาก REP' : null;
+  const stm = r.stm
+    ? (stmIssue ? { st: 'warn', text: `มี · ${stmIssue}` } : { st: 'ok', text: 'มี · โอนแล้ว' })
+    : r.stm_required ? { st: 'na', text: r.paid ? 'ยังไม่พบ (รอ Statement)' : 'ไม่มี' } : { st: 'off', text: 'ไม่ต้องใช้ Statement' };
+  return [['ทะเบียน', reg], ['HOSxP', his], ['REP', rep], ['STM', stm]];
 }
-/** จุด 3 จุดต่อกัน: ทะเบียน → HOSxP → REP (เทา = ไม่มี · เขียว = มี · เหลือง = มีแต่มีปัญหา) */
+/** จุด 4 จุดต่อกัน: ทะเบียน → HOSxP → REP → STM (เทา = ไม่มี · เขียว = มี · เหลือง = มีแต่มีปัญหา) */
 function Sources({ r }) {
   const list = sourcesOf(r);
   const issue = list.find(([, x]) => x.st === 'warn');
@@ -67,8 +82,8 @@ function Sources({ r }) {
       <div className="pt-prog">
         {list.map(([n, x], i) => (
           <Fragment key={n}>
-            {i > 0 && <b className={x.st !== 'na' && list[i - 1][1].st !== 'na' ? 'done' : ''} />}
-            <i className={x.st === 'ok' ? 'done' : x.st === 'warn' ? 'warn' : ''} />
+            {i > 0 && <b className={['ok', 'warn'].includes(x.st) && ['ok', 'warn'].includes(list[i - 1][1].st) ? 'done' : ''} />}
+            <i className={x.st === 'ok' ? 'done' : x.st === 'warn' ? 'warn' : x.st === 'off' ? 'off' : ''} />
           </Fragment>
         ))}
       </div>
@@ -105,9 +120,12 @@ function RowDetail({ r }) {
   if (r.problems.includes('NOT_PAID')) repIssues.push(`ยังไม่ได้รับเงินกองทุน ${r.fund.code}`);
   if (r.problems.includes('NOT_SENT')) repIssues.push('เข้าเกณฑ์แต่ยังไม่พบใน REP');
   const fundBad = r.problems.includes('EXTRA');
+  const stmIssues = [];
+  if (r.problems.includes('STM_NO_REP')) stmIssues.push(`TRAN_ID ${r.stm.no_rep.map((x) => x.tran_id).join(', ')} อยู่ใน Statement แต่ไม่พบใน REP`);
+  if (r.problems.includes('STM_DIFF')) stmIssues.push(`ได้รับ (REP) ${money(r.rep?.compensated)} แต่โอนจริง (STM) ${money(r.stm.paid)}`);
   return (
     <div className="row-detail">
-      <div className="src-boxes">
+      <div className="src-boxes four">
         {r.registries.length ? <RegistryBox r={r} /> : (
           <Box title="ทะเบียน" icon="bi-journal-text" bad={null}>
             <p className="small muted mb-0">{r.vn ? 'ห้องของ visit นี้ไม่มีทะเบียนในช่วงนี้' : 'ไม่พบ visit ใน HOSxP จึงเทียบกับทะเบียนไม่ได้'}</p>
@@ -163,6 +181,28 @@ function RowDetail({ r }) {
             </div>
           )}
         </Box>
+        <Box title="Statement (โอนเงิน)" icon="bi-bank" bad={r.stm ? stmIssues.length > 0 : r.stm_required && r.paid ? true : null}>
+          <BoxReason items={stmIssues} />
+          {!r.stm ? (
+            <p className="small mb-0">{r.stm_required ? 'ยังไม่พบใน Statement' : 'ยังไม่มี Statement'}
+              <span className="d-block muted">
+                {r.stm_required
+                  ? (r.paid ? 'REP จ่ายแล้ว รอไฟล์ Statement ที่มี TRAN_ID นี้ (นำเข้าที่หน้านำเข้าไฟล์ สปสช. เลือก Statement)' : 'จะตรวจเมื่อ REP จ่ายเงินแล้ว')
+                  : 'กองทุนนี้ไม่ได้ตั้งค่า “ต้องมี Statement”'}
+              </span>
+            </p>
+          ) : (
+            <div className="small">
+              {r.stm.linked && <Field label="โอนจริง (STM)">{money(r.stm.paid)}</Field>}
+              {r.stm.no_rep.map((x) => <Field key={x.tran_id} label="โอนจริง (ไม่พบใน REP)">{money(x.paid)} <span className="small-id">TRAN_ID {x.tran_id}</span></Field>)}
+              {r.stm.other.map((x) => <Field key={x.tran_id} label="โอนจริง (REP ช่วงอื่น)">{money(x.paid)} <span className="small-id">TRAN_ID {x.tran_id}</span></Field>)}
+              {r.stm.tran_ids && <Field label="TRAN_ID">{r.stm.tran_ids}</Field>}
+              {r.stm.docs && <Field label="เลขที่เอกสาร">{r.stm.docs}</Field>}
+              {r.stm.stm_date && <Field label="งวดวันที่">{thaiDate(r.stm.stm_date)}</Field>}
+              {r.stm.lines > 1 && <Field label="จำนวนรอบ">{r.stm.lines} รายการ (รวมยอดทุกรอบ)</Field>}
+            </div>
+          )}
+        </Box>
       </div>
     </div>
   );
@@ -177,6 +217,16 @@ export default function PatientsPage() {
   const [fund, setFund] = useState(list(init.fund));
   const [step, setStep] = useState(Number(init.step) || 0);
   const [problem, setProblem] = useState(init.problem || '');
+  // นับจาก: all = ทุก visit · reg = เฉพาะคนในทะเบียน (ติดตามจนครบทุกขั้น)
+  // v53: โหมดนับจากทะเบียนย้ายไปแท็บติดตามทะเบียน มุมมองนี้นับทุก visit
+  const [base, setBase] = useState('all');
+  // มุมมอง: all = ทุก visit ใน HOSxP (ค่าเริ่มต้น) · track = ติดตามทะเบียน
+  const [view, setView] = useState(init.view === 'track' ? 'track' : 'all');
+  const [trackKey, setTrackKey] = useState(0);
+  const [trackSel, setTrackSel] = useState(null);   // กลุ่มที่เปิดเมื่อมาจากประวัติอัปโหลด
+  const bumpTrack = () => setTrackKey((k) => k + 1);
+  const [drop, setDrop] = useState(Number(init.drop) || 0);
+  const isReg = base === 'reg';
   const [search, setSearch] = useState(init.q || '');
   const [searchInput, setSearchInput] = useState(init.q || '');
   const [page, setPage] = useState(1);
@@ -197,8 +247,9 @@ export default function PatientsPage() {
     dateFrom: range.dateFrom, dateTo: range.dateTo,
     point: point.length ? point.join(',') : undefined, fund: fund.length ? fund.join(',') : undefined,
     step: step || undefined, problem: problem || undefined, search: search || undefined,
+    base: isReg ? 'reg' : undefined, drop: drop || undefined,
     sort: sort.key || undefined, dir: sort.key ? sort.dir : undefined,
-  }), [range, point, fund, step, problem, search, sort]);
+  }), [range, point, fund, step, problem, search, sort, isReg, drop]);
 
   // เก็บตัวกรองไว้ใน URL: ส่งลิงก์ให้กันได้ และกดย้อนกลับแล้วได้ตัวกรองเดิม
   useEffect(() => {
@@ -208,16 +259,19 @@ export default function PatientsPage() {
     if (step) q.step = String(step);
     if (problem) q.problem = problem;
     if (search) q.q = search;
+    if (isReg) q.base = 'reg';
+    if (view === 'track') q.view = 'track';
+    if (drop) q.drop = String(drop);
     setSp(q, { replace: true });
-  }, [range, point, fund, step, problem, search, setSp]);
+  }, [range, point, fund, step, problem, search, isReg, drop, view, setSp]);
 
   const load = useCallback((fresh = false) => {
-    if (rangeError) return;
+    if (rangeError || view !== 'all') return;
     setLoading(true);
     api.get('/patients', { params: { ...params, page, pageSize: PAGE_SIZE, fresh: fresh ? 1 : undefined } })
       .then((r) => setData(r.data)).catch((err) => showError(err, 'โหลดรายชื่อไม่สำเร็จ'))
       .finally(() => setLoading(false));
-  }, [params, page, rangeError]);
+  }, [params, page, rangeError, view]);
   useEffect(() => { load(); setOpen(null); setPop(null); }, [load]);
 
   const loadLists = useCallback(() => {
@@ -244,9 +298,19 @@ export default function PatientsPage() {
   useEffect(() => () => clearTimeout(popTimer.current), []);
 
   const reset = (fn) => (v) => { fn(v); setPage(1); };
-  const pickStep = (n) => { setStep(step === n ? 0 : n); setProblem(''); setPage(1); };
-  const pickProblem = (k) => { setProblem(problem === k ? '' : k); setStep(0); setPage(1); };
-  const clearAll = () => { setPoint([]); setFund([]); setStep(0); setProblem(''); setSearch(''); setSearchInput(''); setPage(1); };
+  const pickStep = (n) => { setStep(step === n ? 0 : n); setProblem(''); setDrop(0); setPage(1); };
+  const pickProblem = (k) => { setProblem(problem === k ? '' : k); setStep(0); setDrop(0); setPage(1); };
+  const clearSteps = () => { setStep(0); setDrop(0); setProblem(''); setPage(1); };
+  const pickDrop = (k) => { setDrop(drop === k ? 0 : k); setStep(0); setProblem(''); setPage(1); };
+  const clearAll = () => { setPoint([]); setFund([]); setStep(0); setProblem(''); setDrop(0); setSearch(''); setSearchInput(''); setPage(1); };
+  /** จากตาราง/ประวัติ: กรองห้อง + ช่วงวันที่ + ตกหล่น/ปัญหา แล้วเลื่อนไปที่รายชื่อ */
+  const applyFilter = ({ point: pt, dateFrom, dateTo, drop: dk, problem: pk, base: b }) => {
+    if (pt) setPoint([pt]);
+    if (dateFrom && dateTo) setRange({ dateFrom, dateTo });
+    if (b) setBase(b);
+    setStep(0); setDrop(dk || 0); setProblem(pk || ''); setPage(1);
+    setTimeout(() => document.getElementById('pt-list')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+  };
 
   const removeUpload = async (b) => {
     if (!(await confirmAction({ title: 'ลบการอัปโหลดนี้?', text: `${b.file_name}: รายการในทะเบียนจากไฟล์นี้จะถูกลบ`, confirmText: 'ลบ', danger: true }))) return;
@@ -267,20 +331,23 @@ export default function PatientsPage() {
     ]),
     { value: NO_FUND, label: 'ไม่เข้าเกณฑ์กองทุนใด' },
   ];
-  const filtered = point.length || fund.length || step || problem || search;
+  const filtered = point.length || fund.length || step || problem || search || drop;
   const stepLabel = STEPS.find((s) => s.n === step)?.label;
+  const steps = isReg ? [REG_STEP, ...STEPS] : STEPS;
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>รายชื่อคนไข้</h1>
-          <p>คนไข้แต่ละคนไปถึงขั้นไหนแล้ว: ให้บริการ → เข้าเกณฑ์ → ส่งเบิก → ได้รับเงิน และต้องทำอะไรต่อ (กองทุนดูจากการตั้งค่ากองทุน · ทะเบียนจากห้อง/แผนก)</p>
+          <p>{view === 'track'
+            ? 'ทะเบียนจากหน้างานไปถึงขั้นไหนแล้ว ติดอยู่ตรงไหน และต้องทำอะไรต่อ'
+            : 'ทุก visit ใน HOSxP: ให้บริการ → เข้าเกณฑ์ → ส่งเบิก → ได้รับเงิน → ได้รับโอนจริง และต้องทำอะไรต่อ'}</p>
         </div>
         <div className="d-flex flex-wrap gap-2">
           <button type="button" className="btn btn-outline-primary" disabled={!!rangeError}
             title="ดึง visit และรายการค่าใช้จ่ายของช่วงวันที่ที่เลือกจาก HOSxP ใหม่ (แทนที่ข้อมูลเดิมของช่วงนี้)"
-            onClick={async () => { if (await pullHosxpOpd(range)) load(); }}>
+            onClick={async () => { if (await pullHosxpOpd(range)) { load(); bumpTrack(); } }}>
             <i className="bi bi-database-down me-1" />ดึงข้อมูล HOSxP ช่วงนี้
           </button>
           <button type="button" className="btn btn-primary" onClick={() => setModal('point')}>
@@ -289,6 +356,25 @@ export default function PatientsPage() {
         </div>
       </div>
 
+      <ul className="nav nav-tabs mb-3" role="tablist">
+        <li className="nav-item">
+          <button type="button" role="tab" className={`nav-link ${view === 'all' ? 'active' : ''}`} aria-selected={view === 'all'} onClick={() => setView('all')}>
+            <i className="bi bi-hospital me-1" />ทุก visit ใน HOSxP <span className="small muted">(งานเคลม)</span>
+          </button>
+        </li>
+        <li className="nav-item">
+          <button type="button" role="tab" className={`nav-link ${view === 'track' ? 'active' : ''}`} aria-selected={view === 'track'} onClick={() => setView('track')}>
+            <i className="bi bi-journal-check me-1" />ติดตามทะเบียน
+          </button>
+        </li>
+      </ul>
+
+      {view === 'track' && (
+        <RegistryTracker key={trackSel || 'auto'} initialSel={trackSel} range={range} onRange={setRange} point={point[0] || null}
+          onPoint={(c) => setPoint(c ? [c] : [])} points={points} reloadKey={trackKey} />
+      )}
+
+      {view === 'all' && (<>
       <div className="panel">
         <div className="row g-3 align-items-end">
           <PeriodFields idPrefix="pt" value={range} onChange={reset(setRange)} />
@@ -334,69 +420,85 @@ export default function PatientsPage() {
           <span className="spinner-border spinner-border-sm me-2" />กำลังคำนวณรายชื่อ… ช่วงวันที่ยาว (เช่น ทั้งปีงบประมาณ) ครั้งแรกอาจใช้เวลาหลายวินาที เปลี่ยนตัวกรองหลังจากนั้นจะเร็วขึ้น
         </div>
       )}
-      {data && (
-        <div className={`panel ${loading ? 'is-loading' : ''}`}>
-          <div className="pt-funnel" role="group" aria-label="ขั้นตอน (กดเพื่อกรอง)">
-            {STEPS.map((s, i) => {
-              const v = f[s.key];
-              const prev = i > 0 ? f[STEPS[i - 1].key] : null;
-              return (
-                <button key={s.n} type="button" className={`pt-step ${step === s.n ? 'active' : ''}`} aria-pressed={step === s.n} onClick={() => pickStep(s.n)}>
-                  <span className="t"><span className="dot" style={{ background: s.dot }} />{s.label}</span>
-                  <span className="n">{int(v.persons)} <small>คน{prev ? ` · ${pct(v.persons, prev.persons)}` : ''}</small></span>
-                  <span className="m">{int(v.visits)} visit · {STEP_MONEY[s.key]} {money(v.amount)}</span>
-                  {s.key === 'served' && <span className="m">{fund.length || point.length ? 'ตามตัวกรองที่เลือก' : 'ทุก visit ในช่วงนี้'}</span>}
-                  {s.key === 'eligible' && <span className="m">ไม่เข้าเกณฑ์ {int(Math.max(f.served.visits - v.visits, 0))} visit</span>}
-                  {s.key === 'sent' && f.notSent.visits > 0 && <span className="drop">ยังไม่ส่ง {int(f.notSent.persons)} คน · {money(f.notSent.amount)}</span>}
-                  {s.key === 'paid' && f.notPaid.visits > 0 && <span className="drop">ติด C / ยังไม่ได้รับ {int(f.notPaid.persons)} คน</span>}
-                </button>
-              );
-            })}
-          </div>
-
-          {PROBLEM_GROUPS.map((g) => {
-            const items = g.keys.map((k) => [k, data.problems[k]]).filter(([k, p]) => p && (p.count > 0 || problem === k));
-            return (
-              <div key={g.label} className="cmp-pills mt-3" role="group" aria-label={`กรองตาม${g.label}`}>
-                <span className="small muted me-1 pill-group">{g.label}:</span>
-                {items.map(([k, p]) => (
-                  <button key={k} type="button" className={`cmp-pill ${problem === k ? 'active' : ''}`} aria-pressed={problem === k}
-                    title={`${int(p.count)} visit · ${int(p.persons)} คน`}
-                    style={{ '--c': LEVEL_COLOR[p.level] }} onClick={() => pickProblem(k)}>
-                    {p.label} <span className="n">{int(p.persons)} คน</span>
-                  </button>
-                ))}
-                {!items.length && <span className="small text-success"><i className="bi bi-check-circle me-1" />{g.ok}</span>}
+      {data && (() => {
+        // ขั้นตอนแนวนอน (v54): กดช่อง = รายชื่อที่ติดขั้นนั้น (ช่องแรก = ทุก visit)
+        const dv = (k) => f.drops[k]?.visits || 0;
+        const cards = [
+          { k: 0, label: 'ให้บริการ', num: f.served.visits, of: 'visit ในช่วงนี้', foot: <span className="clear muted">ดูทั้งหมด</span> },
+          { k: 2, label: 'เบิกได้', num: f.eligible.visits, of: `จาก ${int(f.served.visits)} visit`, foot: <span className="grey">ไม่เข้าเกณฑ์ {int(dv(2))}</span> },
+          { k: 3, label: 'ส่งเบิกแล้ว', num: f.sent.visits, of: `จาก ${int(f.eligible.visits)} ที่เบิกได้`, stuck: dv(3) },
+          { k: 4, label: 'ตั้งเบิกแล้ว', num: f.paid.visits, of: `จาก ${int(f.sent.visits)} ที่ส่ง`, stuck: dv(4) },
+          { k: 5, label: 'เงินเข้าแล้ว', num: Math.max(f.paid.visits - dv(5), 0), of: `จาก ${int(f.paid.visits)} ที่ตั้งเบิก`, stuck: dv(5), last: true },
+        ];
+        const other = ['NO_HIS', 'REP_DIFF', 'STM_NO_REP', 'STM_DIFF', 'EXTRA'].map((k) => [k, data.problems[k]]).filter(([k, p]) => p && (p.count > 0 || problem === k));
+        const scopeText = [point.length ? point.map((c) => pointName.get(c) || c).join(', ') : 'ทุกห้อง/แผนก',
+          fund.length ? `กองทุน ${fund.join(', ')}` : 'ทุกกองทุน', search ? `ค้นหา “${search}”` : null].filter(Boolean).join(' · ');
+        const M = [
+          [m.roomOnly ? 'ค่าใช้จ่าย (ห้องที่เลือก)' : 'ค่าใช้จ่าย (HOSxP)', m.cost, '', m.roomOnly ? 'เฉพาะค่าใช้จ่ายของห้องที่เลือก' : 'ค่าใช้จ่ายทั้ง visit'],
+          ['เรียกเก็บ (HOSxP)', m.hisClaim, '', 'ยอดลูกหนี้สิทธิใน HOSxP'],
+          ['ตั้งเบิก (กองทุน)', m.fundClaim, 'grp', 'ยอดของรายการที่เข้าเกณฑ์กองทุน'],
+          ['เรียกเก็บ (REP)', m.repClaim, '', 'ยอดที่ส่งเบิกใน REP'],
+          ['ได้รับ (REP)', m.repPaid, 'paid', 'ยอดชดเชยใน REP ทั้ง visit'],
+          ['ได้รับ (กองทุน)', m.fundPaid, 'paid grp', 'ยอดในคอลัมน์ของกองทุนในไฟล์ REP (ตรงกับหน้าภาพรวม)'],
+          ['โอนจริง (STM)', m.stmPaid, 'paid', 'ยอดชดเชยสุทธิในไฟล์ Statement'],
+        ];
+        return (
+          <div className={loading ? 'is-loading' : ''}>
+            <div className="av-money">
+              <div className="av-mhead"><span>ยอดเงินตามตัวกรอง: <b>{scopeText}</b></span><span>{thaiDate(range.dateFrom)} – {thaiDate(range.dateTo)}</span></div>
+              <div className="av-mgrid">
+                {M.map(([l, v, c, t]) => <div key={l} className={`av-mi ${c}`} title={t}><div className="l">{l}</div><div className="v">{money(v)}</div></div>)}
               </div>
-            );
-          })}
-
-          <div className="cmp-strip mt-3" aria-label="ยอดระดับกองทุนตามตัวกรอง">
-            <span className="item strip-head">ยอดกองทุน</span>
-            <span className="item" title="ยอดของรายการที่เข้าเกณฑ์กองทุนใน HOSxP (กองทุนที่คัดตามสิทธิ = เรียกเก็บทั้ง visit)"><span className="lbl">ตั้งเบิก (กองทุน)</span><strong>{money(m.fundClaim)}</strong></span>
-            <span className="item" title="ยอดในคอลัมน์ของกองทุนในไฟล์ REP (ตรงกับหน้าภาพรวม)"><span className="lbl">ได้รับ (กองทุน)</span><strong className="paid">{money(m.fundPaid)}</strong></span>
+            </div>
+            <div className="trk-steps" role="group" aria-label="ขั้นตอน กดเพื่อดูรายชื่อที่ติดขั้นนั้น">
+              {cards.map((c, i) => {
+                const on = c.k === 0 ? !drop && !problem && !step : drop === c.k;
+                return (
+                  <Fragment key={c.k}>
+                    {i > 0 && <span className="trk-arrow" aria-hidden="true">›</span>}
+                    <button type="button" className={`trk-st ${on ? 'on' : ''} ${c.last ? 'last' : ''}`}
+                      onClick={() => (c.k === 0 ? clearSteps() : pickDrop(c.k))}
+                      title={c.k === 0 ? 'ดูทุก visit' : `ดูรายชื่อที่ติดขั้นนี้`}>
+                      <span className="lb">{c.label}</span>
+                      <span className="num">{int(c.num)}</span>
+                      <span className="of">{c.of}</span>
+                      {c.foot || (c.stuck > 0 ? <span className="stuck">ติด {int(c.stuck)}</span> : <span className="clear">✓ ครบ</span>)}
+                    </button>
+                  </Fragment>
+                );
+              })}
+            </div>
+            <div className="trk-notes">
+              {other.length > 0 && <span>ปัญหาอื่น:</span>}
+              {other.map(([k, p]) => (
+                <button key={k} type="button" className={problem === k ? 'on' : ''} onClick={() => pickProblem(k)} title={`${int(p.persons)} คน`}>
+                  {p.label} {int(p.count)}
+                </button>
+              ))}
+              {!other.length && <span className="text-success">ไม่มีปัญหาอื่น</span>}
+              {filtered && <button type="button" className="ok" onClick={clearAll}>ล้างตัวกรองทั้งหมด</button>}
+            </div>
           </div>
-          <div className="cmp-strip mt-2" aria-label="ยอดระดับ visit ตามตัวกรอง">
-            <span className="item strip-head">ยอดทั้ง visit</span>
-            <span className="item"><span className="lbl">{m.roomOnly ? 'ค่าใช้จ่าย (ห้องที่เลือก)' : 'ค่าใช้จ่าย (HOSxP)'}</span><strong>{money(m.cost)}</strong></span>
-            <span className="item"><span className="lbl">เรียกเก็บ (HOSxP)</span><strong>{money(m.hisClaim)}</strong></span>
-            <span className="item"><span className="lbl">เรียกเก็บ (REP)</span><strong>{money(m.repClaim)}</strong></span>
-            <span className="item"><span className="lbl">ได้รับ (REP)</span><strong className="paid">{money(m.repPaid)}</strong></span>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {data && (
-        <div className="panel">
-          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+        <div className="panel" id="pt-list">
+          <div className="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
             <div>
-              <strong>{int(data.total)} รายการ</strong>
-              <span className="small muted ms-2">
-                {int(data.visits)} visit · {int(data.persons)} คน
-                {stepLabel && ` · ขั้น ${stepLabel}`}
-                {problem && ` · ${data.problems[problem]?.label}`}
+              <h5 className="mb-0">{(() => {
+                const t = drop ? { 2: 'ไม่เข้าเกณฑ์กองทุน', 3: 'เบิกได้แต่ยังไม่ส่งเบิก', 4: 'ส่งแล้วยังไม่ได้ตั้งเบิก', 5: 'ตั้งเบิกแล้ว ยังไม่มีเงินเข้า' }[drop]
+                  : problem ? data.problems[problem]?.label : 'ทุก visit';
+                return `${t} ${int(data.visits)} visit`;
+              })()}</h5>
+              <div className="small muted">
+                {drop === 2 ? 'ปกติไม่ต้องเบิก (เช่น ชำระเงินเอง) ตรวจเฉพาะรายการที่ควรเบิกได้'
+                  : drop === 3 ? 'ส่งเบิกใน e-Claim'
+                    : drop === 4 ? 'ติด C ต้องแก้แล้วส่งใหม่ ที่เหลือรอ สปสช.'
+                      : drop === 5 ? 'เฉพาะกองทุนที่ต้องมี Statement'
+                        : `${int(data.total)} แถว (visit ที่มีหลายกองทุนแยกแถวตามกองทุน) · ${int(data.persons)} คน`}
                 {' · '}คลิกแถวเพื่อดูรายละเอียด
-              </span>
+              </div>
             </div>
             <span className="d-flex align-items-center gap-2">
               {loading && <span className="spinner-border spinner-border-sm text-secondary" />}
@@ -405,87 +507,74 @@ export default function PatientsPage() {
                 <i className="bi bi-arrow-clockwise" /><span className="visually-hidden">คำนวณใหม่</span>
               </button>
               <a className={`btn btn-sm btn-outline-secondary ${data.total ? '' : 'disabled'}`} href={exportUrl}>
-                <i className="bi bi-file-earmark-excel me-1" />Excel รายชื่อนี้
+                <i className="bi bi-file-earmark-excel me-1" />Excel
               </a>
             </span>
           </div>
           <div className="table-wrap">
-            <table className="table data-table pt-table">
+            <table className="table data-table pt-table av-table">
               <thead>
                 <tr>
                   <SortTh k="sdate" sort={sort} onSort={onSort}>วันที่</SortTh>
                   <SortTh k="hn" sort={sort} onSort={onSort}>คนไข้</SortTh>
-                  <SortTh k="room" sort={sort} onSort={onSort}>ห้อง/แผนก</SortTh>
+                  {!point.length && <SortTh k="room" sort={sort} onSort={onSort}>ห้อง/แผนก</SortTh>}
                   <SortTh k="fund" sort={sort} onSort={onSort}>กองทุน</SortTh>
-                  <SortTh k="sources" sort={sort} onSort={onSort} title="พบในทะเบียน / HOSxP / REP หรือไม่ (เรียงจากพบน้อยไปมาก)">ทะเบียน · HOSxP · REP</SortTh>
-                  <SortTh k="his" sort={sort} onSort={onSort} className="num" title="ค่าใช้จ่ายทั้ง visit ชี้หรือกดเพื่อดูแยกตามห้อง ตัวเล็กคือเรียกเก็บ (HOSxP)">HOSxP</SortTh>
-                  <SortTh k="rep" sort={sort} onSort={onSort} className="num" title="เรียกเก็บ (REP) ตัวเล็กคือได้รับ (REP)">REP</SortTh>
-                  <SortTh k="todo" sort={sort} onSort={onSort}>ต้องทำอะไรต่อ</SortTh>
+                  <SortTh k="sources" sort={sort} onSort={onSort} title="พบในทะเบียน / HOSxP / REP / Statement หรือไม่ (เทา = ไม่มี · เขียว = มี · เหลือง = มีแต่มีปัญหา)">ทะเบียน · HOSxP · REP · STM</SortTh>
+                  <SortTh k="todo" sort={sort} onSort={onSort}>สาเหตุ</SortTh>
+                  <th>ต้องทำอะไร</th>
+                  <SortTh k="his" sort={sort} onSort={onSort} className="num">เรียกเก็บ</SortTh>
                 </tr>
               </thead>
               <tbody>
-                {data.rows.length === 0 && <tr><td colSpan={8} className="text-center muted py-4">ไม่มีรายชื่อตามตัวกรองนี้</td></tr>}
+                {data.rows.length === 0 && <tr><td colSpan={8} className="text-center muted py-4">✓ ไม่มีรายการตามตัวกรองนี้</td></tr>}
                 {data.rows.map((r) => {
                   const isOpen = open === r.key;
                   const toggle = () => setOpen(isOpen ? null : r.key);
+                  const cols = point.length ? 7 : 8;
                   return (
                     <Fragment key={r.key}>
                       <tr className={`cmp-row ${isOpen ? 'open' : ''}`} onClick={toggle} tabIndex={0} aria-expanded={isOpen}
                         onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); toggle(); } }}>
                         <td className="text-nowrap">{thaiDate(r.sdate)}</td>
                         <td className="pt-cell"><span className="hn">{r.hn || '–'}</span><div className="small-id text-truncate">{r.patient_name}</div></td>
-                        <td className="reg-cell-td"><RoomCell r={r} pointName={pointName} /></td>
+                        {!point.length && <td className="small muted">{r.room_names || '–'}</td>}
                         <td className="fund-cell">{r.fund ? <span title={r.fund.name}>{r.fund.code}<div className="small-id">{r.fund.activities || r.fund.name}</div></span> : <span className="muted small">ไม่เข้าเกณฑ์</span>}</td>
                         <td className="prog-cell"><Sources r={r} /></td>
-                        <td className="num">
-                          {!r.vn ? <span className="muted small">ไม่พบ visit</span> : (
-                            <button type="button" className={`amt-btn ${pop?.key === r.key ? 'on' : ''}`} aria-haspopup="dialog"
-                              aria-label={`ยอด HOSxP ทั้ง visit ${money(r.vn_total)} บาท ดูแยกตามห้อง`}
-                              onMouseEnter={(e) => showPop(e, r.key, r)} onMouseLeave={laterClose}
-                              onFocus={(e) => showPop(e, r.key, r)} onBlur={laterClose}
-                              onClick={(e) => togglePop(e, r.key, r)}>
-                              {money(r.vn_total)}
-                            </button>
-                          )}
-                          {r.vn && <div className="small-id">เรียกเก็บ {money(r.uc_money)}</div>}
-                        </td>
-                        <td className="num">
-                          {r.rep ? (<>{money(r.rep.claim_amount)}<div className="small-id">ได้รับ {money(r.rep.compensated)}</div></>)
-                            : <span className="muted small">{r.vn ? 'ยังไม่พบ' : '–'}</span>}
-                        </td>
-                        <td className="todo-cell">
-                          <div className="d-flex align-items-start gap-2">
-                            <div className="min-w-0 flex-grow-1">
-                              <span className={`todo-k ${r.todo.level}`}>{r.todo.title}</span>
-                              {r.todo.text && r.todo.text !== '–' && <div className="reason" title={r.todo.text}>{r.todo.text}</div>}
-                            </div>
-                            <i className={`bi ${isOpen ? 'bi-chevron-up' : 'bi-chevron-down'} muted chev`} aria-hidden="true" />
-                          </div>
-                        </td>
+                        <td><span className={`todo-k ${r.todo.level}`}>{r.todo.title}</span></td>
+                        <td className="todo-cell">{r.todo.text && r.todo.text !== '–' ? <span className="reason" title={r.todo.text}>{r.todo.text}</span> : <span className="muted">–</span>}</td>
+                        <td className="num">{r.vn ? money(r.uc_money) : <span className="muted small">ไม่พบ visit</span>}</td>
                       </tr>
-                      {isOpen && <tr className="detail-row"><td colSpan={8}><RowDetail r={r} /></td></tr>}
+                      {isOpen && <tr className="detail-row"><td colSpan={cols}><RowDetail r={r} /></td></tr>}
                     </Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
-          <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
-            <span className="small muted">หนึ่งแถว = 1 visit ใน 1 กองทุน · ชี้ยอด HOSxP เพื่อดูแยกตามห้อง</span>
+          <div className="d-flex flex-wrap justify-content-end align-items-center gap-2 mt-2">
             <Pagination page={page} pageSize={PAGE_SIZE} total={data.total} onChange={setPage} />
           </div>
         </div>
       )}
-      {pop && <DeptPopover pop={pop} onEnter={cancelClose} onLeave={laterClose} onClose={closePop} />}
 
-      <UploadHistory uploads={uploads} onRemove={removeUpload} />
+      {data && <RoomSummary rooms={data.rooms} isReg={false} selected={point} defaultOpen={false} onPick={(code, dk) => applyFilter({ point: code, drop: dk })} />}
+      {data && <DataCoverage coverage={data.coverage} defaultOpen={false} onPickDay={(d) => applyFilter({ dateFrom: d, dateTo: d })} />}
+      </>)}
+
+      <UploadHistory uploads={uploads} onRemove={removeUpload}
+        onFilter={(b, k) => {
+          // ไปที่แท็บติดตามทะเบียน: ห้อง + ช่วงวันที่ของไฟล์ และเปิดกลุ่มที่กด
+          setView('track'); setPoint([b.target_code]); setRange({ dateFrom: b.date_from, dateTo: b.date_to });
+          setTrackSel(k.drop ? String(k.drop) : k.problem === 'REG_DIFF' ? 'diff' : k.problem === 'NOT_IN_REG' ? 'out' : 'all');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }} />
 
       <div className="small muted mt-3">
         มุมมองเดิม (ยังใช้ได้ระหว่างเปลี่ยนผ่าน):{' '}
         <Link to="/recon/opd">กระทบยอด OPD</Link> · <Link to="/recon/funds">แยกกองทุน OPD (วิเคราะห์รายการ, สรุปรายเดือน)</Link> · <Link to="/registry">เทียบ 3 แหล่ง</Link>
       </div>
 
-      {modal === 'point' && <PointUploadModal points={points} onClose={() => setModal(null)} onDone={() => { setModal(null); loadLists(); load(); }} />}
+      {modal === 'point' && <PointUploadModal points={points} onClose={() => setModal(null)} onDone={() => { setModal(null); loadLists(); load(); bumpTrack(); }} />}
     </>
   );
 }

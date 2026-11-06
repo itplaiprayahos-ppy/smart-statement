@@ -17,21 +17,23 @@ router.get('/', asyncHandler(async (req, res) => {
 }));
 
 function readBody(body = {}) {
-  const { name, claim_type = 'OPD', header_row = null, sheet_name = null, mapping, is_active = true } = body;
+  const { name, claim_type = 'OPD', header_row = null, sheet_name = null, mapping, is_active = true, file_type = 'REP' } = body;
+  if (!['REP', 'STM', 'OLD'].includes(file_type)) throw new HttpError(400, 'ประเภทไฟล์ต้องเป็น REP หรือ Statement');
+  if (file_type === 'STM' && !mapping?.tran_id) throw new HttpError(400, 'รูปแบบไฟล์ Statement ต้องกำหนดคอลัมน์ TRAN_ID (ใช้เชื่อมกับ REP)');
   if (!name?.trim()) throw new HttpError(400, 'กรุณาตั้งชื่อรูปแบบไฟล์');
   if (!['OPD', 'IPD'].includes(claim_type)) throw new HttpError(400, 'ประเภทต้องเป็น OPD หรือ IPD');
   const err = validateMapping(mapping);
   if (err) throw new HttpError(400, err);
   const hr = header_row === '' || header_row === null ? null : Number(header_row);
   if (hr !== null && (!Number.isInteger(hr) || hr < 1)) throw new HttpError(400, 'แถวหัวตารางต้องเป็นจำนวนเต็มตั้งแต่ 1');
-  return [name.trim(), claim_type, hr, sheet_name?.trim() || null, JSON.stringify(mapping), !!is_active];
+  return [name.trim(), claim_type, hr, sheet_name?.trim() || null, JSON.stringify(mapping), !!is_active, file_type];
 }
 
 router.post('/', requireRole('admin'), asyncHandler(async (req, res) => {
   try {
     const { rows } = await db.query(
-      `INSERT INTO column_mappings (name, claim_type, header_row, sheet_name, mapping, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      `INSERT INTO column_mappings (name, claim_type, header_row, sheet_name, mapping, is_active, file_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       readBody(req.body),
     );
     res.status(201).json(rows[0]);
@@ -44,7 +46,7 @@ router.post('/', requireRole('admin'), asyncHandler(async (req, res) => {
 router.put('/:id', requireRole('admin'), asyncHandler(async (req, res) => {
   const { rows } = await db.query(
     `UPDATE column_mappings SET name = $2, claim_type = $3, header_row = $4, sheet_name = $5,
-       mapping = $6, is_active = $7, updated_at = now()
+       mapping = $6, is_active = $7, file_type = $8, updated_at = now()
      WHERE id = $1 RETURNING *`,
     [Number(req.params.id), ...readBody(req.body)],
   );

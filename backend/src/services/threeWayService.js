@@ -284,6 +284,30 @@ export async function exportAll(opts) {
 
 /** ประวัติอัปโหลดทะเบียนห้อง/แผนก */
 export async function listUploads() {
+  const rows = await uploadRows();
+  // ผลเทียบกับ HOSxP ของแต่ละไฟล์ที่ยังใช้อยู่: กี่คน พบใน HOSxP กี่คน ไม่พบ / ยอดไม่ตรง / HOSxP มีแต่ไม่อยู่ในทะเบียน
+  const live = rows.filter((b) => b.current_rows > 0);
+  if (!live.length) return rows;
+  const from = live.reduce((a, b) => (b.date_from < a ? b.date_from : a), live[0].date_from);
+  const to = live.reduce((a, b) => (b.date_to > a ? b.date_to : a), live[0].date_to);
+  const entries = await pointEntries({ dateFrom: from, dateTo: to });
+  const who = (e) => e.cid || `HN:${String(e.hn || '').replace(/^0+/, '')}`;
+  live.forEach((b) => {
+    const mine = entries.filter((e) => e.code === b.target_code && e.sdate >= b.date_from && e.sdate <= b.date_to);
+    const reg = mine.filter((e) => e.src === 'REG');
+    const persons = (list) => new Set(list.map(who)).size;
+    b.summary = {
+      persons: persons(reg),
+      found: persons(reg.filter((e) => e.vn)),
+      not_found: persons(reg.filter((e) => e.status === 'NO_VISIT')),
+      diff: persons(reg.filter((e) => e.status === 'HIS_DIFF')),
+      not_in_reg: persons(mine.filter((e) => e.status === 'NOT_IN_REGISTRY')),
+    };
+  });
+  return rows;
+}
+
+async function uploadRows() {
   const { rows } = await db.query(`
     SELECT 'point' AS kind, b.id, b.point_code AS target_code, p.name AS target_name, b.file_name, b.date_from, b.date_to,
            b.valid_rows, b.error_rows, b.created_at, b.uploaded_by, u.full_name AS uploaded_by_name,

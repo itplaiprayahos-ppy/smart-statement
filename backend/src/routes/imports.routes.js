@@ -21,7 +21,9 @@ const upload = multer({
 // multer อ่านชื่อไฟล์เป็น latin1 แปลงกลับเป็น UTF-8 เพื่อให้ชื่อไฟล์ภาษาไทยถูกต้อง
 const fileNameOf = (file) => Buffer.from(file.originalname, 'latin1').toString('utf8');
 
-async function loadFunds() {
+async function loadFunds(profile) {
+  // Statement ไม่ได้แยกยอดรายกองทุน (ยอดโอนทั้งรายการ)
+  if (profile?.file_type === 'STM') return [];
   const { rows } = await db.query('SELECT code, stm_columns FROM funds WHERE is_active ORDER BY sort_order, code');
   return rows;
 }
@@ -41,9 +43,10 @@ router.post('/preview', upload.single('file'), asyncHandler(async (req, res) => 
   requireFile(req);
   const profile = await loadProfile(req.body.mappingId);
   const fileName = fileNameOf(req.file);
-  const parsed = parseExcel(req.file.buffer, profile, await loadFunds(), fileName);
+  const parsed = parseExcel(req.file.buffer, profile, await loadFunds(profile), fileName);
   res.json({
     fileName,
+    fileType: profile.file_type,
     stmDoc: parsed.stmDoc,
     stmPeriod: parsed.stmPeriod,
     sheetName: parsed.sheetName,
@@ -68,7 +71,7 @@ router.post('/', upload.single('file'), asyncHandler(async (req, res) => {
   requireFile(req);
   const profile = await loadProfile(req.body.mappingId);
   const fileName = fileNameOf(req.file);
-  const parsed = parseExcel(req.file.buffer, profile, await loadFunds(), fileName);
+  const parsed = parseExcel(req.file.buffer, profile, await loadFunds(profile), fileName);
   if (parsed.missingRequired.length) {
     throw new HttpError(400, `ไฟล์ขาดคอลัมน์ที่จำเป็น: ${parsed.missingRequired.join(', ')}`);
   }
@@ -83,12 +86,18 @@ router.get('/', asyncHandler(async (req, res) => {
   const { rows } = await db.query(
     `SELECT b.id, b.file_name, b.claim_type, b.total_rows, b.inserted_rows, b.updated_rows,
             b.error_rows, b.created_at, b.stm_doc, b.stm_period, b.file_type, m.name AS mapping_name, u.username AS imported_by,
-            (SELECT COUNT(*)::int FROM nhso_lines l WHERE l.batch_id = b.id) AS current_rows,
-            (SELECT MIN(service_date) FROM nhso_lines l WHERE l.batch_id = b.id) AS date_min,
-            (SELECT MAX(service_date) FROM nhso_lines l WHERE l.batch_id = b.id) AS date_max
+            COALESCE(l.n, s.n, 0) AS current_rows,
+            COALESCE(l.dmin, s.dmin) AS date_min, COALESCE(l.dmax, s.dmax) AS date_max,
+            s.matched AS stm_matched
      FROM import_batches b
      LEFT JOIN column_mappings m ON m.id = b.mapping_id
      LEFT JOIN users u ON u.id = b.imported_by
+     LEFT JOIN LATERAL (SELECT COUNT(*)::int AS n, MIN(service_date) AS dmin, MAX(service_date) AS dmax
+                        FROM nhso_lines x WHERE x.batch_id = b.id HAVING COUNT(*) > 0) l ON TRUE
+     -- Statement: จำนวนรายการ และจำนวนที่พบ TRAN_ID ใน REP แล้ว
+     LEFT JOIN LATERAL (SELECT COUNT(*)::int AS n, MIN(service_date) AS dmin, MAX(service_date) AS dmax,
+                               COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM nhso_lines r WHERE r.tran_id = x.tran_id))::int AS matched
+                        FROM stm_lines x WHERE x.batch_id = b.id HAVING COUNT(*) > 0) s ON b.file_type = 'STM'
      WHERE ($1::text IS NULL OR b.claim_type = $1)
      ORDER BY b.created_at DESC LIMIT 100`,
     [req.query.claimType || null],
@@ -96,18 +105,18 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json(rows);
 }));
 
-/** ข้อมูล Statement เดิม (ก่อนเปลี่ยนมาใช้ REP) ที่ยังค้างอยู่ */
+/** ข้อมูล Statement รุ่นเก่า (ก่อนเปลี่ยนมาใช้ REP, file_type = OLD) ที่ยังค้างอยู่ใน nhso_lines */
 router.get('/legacy-stm', asyncHandler(async (_req, res) => {
   const { rows: [r] } = await db.query(`
     SELECT COUNT(DISTINCT b.id)::int AS batches, COUNT(l.id)::int AS lines
     FROM import_batches b LEFT JOIN nhso_lines l ON l.batch_id = b.id
-    WHERE b.file_type = 'STM'`);
+    WHERE b.file_type = 'OLD'`);
   res.json(r);
 }));
 
 /** ลบข้อมูล Statement เดิมทั้งหมด (ใช้ REP อย่างเดียว ป้องกันยอดนับซ้ำ) */
 router.delete('/legacy-stm', requireRole('admin'), asyncHandler(async (req, res) => {
-  const { rows } = await db.query(`DELETE FROM import_batches WHERE file_type = 'STM' RETURNING id`);
+  const { rows } = await db.query(`DELETE FROM import_batches WHERE file_type = 'OLD' RETURNING id`);
   await audit(req, 'import_delete_legacy_stm', { batches: rows.length });
   res.json({ deleted: rows.length });
 }));
