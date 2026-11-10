@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import DataStatusBar from './DataStatusBar.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import { ThemeToggle } from '../context/ThemeContext.jsx';
 import { confirmAction } from '../utils/alert.js';
 
 const MENU = [
@@ -38,6 +39,7 @@ export default function Layout() {
           <i className="bi bi-list" />
         </button>
         <span>กระทบยอดเบิกจ่าย สปสช.</span>
+        <span className="ms-auto"><ThemeToggle /></span>
       </div>
 
       <aside className={`sidebar ${open ? 'open' : ''}`} onClick={() => setOpen(false)}>
@@ -62,6 +64,7 @@ export default function Layout() {
           <div className="d-flex align-items-center justify-content-between mt-1">
             <span className="role-tag">{ROLE_TH[user.role] || user.role}</span>
             <span className="d-flex gap-1">
+              <ThemeToggle />
               <NavLink to="/account" className="btn btn-sm btn-link text-light p-1" title="เปลี่ยนรหัสผ่าน">
                 <i className="bi bi-key" /><span className="visually-hidden">เปลี่ยนรหัสผ่าน</span>
               </NavLink>

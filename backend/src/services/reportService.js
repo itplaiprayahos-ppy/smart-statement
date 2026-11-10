@@ -84,6 +84,61 @@ export async function countReport(opts) {
   });
 }
 
+/** ตัดเลข icode ที่ติดท้ายชื่อรายการ เช่น "ตรวจ ANC (30012)" -> "ตรวจ ANC" */
+function stripIcode(name, icode) {
+  let s = String(name ?? '').trim();
+  if (!s || s === String(icode)) return '';
+  const code = String(icode).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  s = s.replace(new RegExp(`\\s*[(\\[]\\s*${code}\\s*[)\\]]\\s*$`), '');
+  s = s.replace(/\s*\(\d{3,}\)\s*$/, '');
+  return s.trim();
+}
+
+/**
+ * ขยายแถวเป็น "แถวละค่าบริการที่เข้าเกณฑ์" (ชื่อตามที่ตั้งค่ากองทุน ไม่มี icode)
+ *  - เฉพาะ icode ที่ visit นั้นมีจริงและอยู่ในการตั้งค่า (กองทุนแบบกิจกรรม: เฉพาะกิจกรรมที่ visit ผ่าน)
+ *  - ตั้งเบิก (กองทุน) = ยอดของค่าบริการนั้น; ได้รับ (กองทุน) เป็นระดับ visit จึงใส่ที่แถวแรกเท่านั้น (กันรวมซ้ำใน Excel)
+ *  - กองทุนแบบสิทธิ/ICD และแถว EXTRA_PAID/RECEIVED คงข้อความเหตุผลเดิม
+ */
+async function expandRows(c, rows) {
+  const codes = new Set();
+  const actIds = new Set();
+  rows.forEach((r) => {
+    String(r.item_codes || '').split(', ').filter(Boolean).forEach((x) => codes.add(x));
+    (r.act_ids || []).forEach((id) => actIds.add(id));
+  });
+  const [{ rows: fis }, { rows: acts }, { rows: his }] = await Promise.all([
+    c.query('SELECT fund_code, icode, item_name FROM fund_items WHERE icode = ANY($1)', [[...codes]]),
+    c.query('SELECT activity_id, icode, item_name FROM fund_activity_items WHERE activity_id = ANY($1)', [[...actIds]]),
+    c.query(`SELECT vn, icode, MAX(item_name) AS item_name, SUM(sum_price) AS price FROM his_opd_items
+             WHERE vn = ANY($1) AND icode = ANY($2) GROUP BY vn, icode`,
+    [[...new Set(rows.map((r) => r.vn).filter(Boolean))], [...codes]]),
+  ]);
+  const fundName = new Map(fis.map((x) => [`${x.fund_code}|${x.icode}`, stripIcode(x.item_name, x.icode)]));
+  const actName = new Map(acts.map((x) => [`${x.activity_id}|${x.icode}`, stripIcode(x.item_name, x.icode)]));
+  const hisInfo = new Map(his.map((x) => [`${x.vn}|${x.icode}`, { name: stripIcode(x.item_name, x.icode), price: Number(x.price) }]));
+
+  const out = [];
+  rows.forEach((r) => {
+    const mine = String(r.item_codes || '').split(', ').filter(Boolean);
+    if (['EXTRA_PAID', 'RECEIVED'].includes(r.fund_status) || !mine.length) { out.push(r); return; }
+    const lines = mine.map((code) => {
+      const h = hisInfo.get(`${r.vn}|${code}`);
+      const name = (r.act_ids || []).map((id) => actName.get(`${id}|${code}`)).find(Boolean)
+        || fundName.get(`${r.fund_code}|${code}`) || h?.name || '';
+      return { code, name, price: h?.price ?? null };
+    }).sort((a, b) => a.name.localeCompare(b.name, 'th') || a.code.localeCompare(b.code));
+    lines.forEach((l, idx) => out.push({
+      ...r,
+      items: l.name,
+      item_codes: l.code,
+      his_fund_amount: l.price,
+      stm_fund_amount: idx === 0 ? r.stm_fund_amount : null,
+    }));
+  });
+  return out;
+}
+
 function toSheetRows(rows) {
   return rows.map((r) => ({
     'กองทุน': r.fund_code,
@@ -92,15 +147,12 @@ function toSheetRows(rows) {
     'วันที่รับบริการ': r.sdate,
     'VN': r.vn,
     'HN': r.hn,
-    'เลขบัตรประชาชน': r.cid,
     'ชื่อ-สกุล': r.patient_name,
-    'รหัสสิทธิ': r.pttype,
     'สิทธิ': r.pttype_name,
     'PDX': r.pdx,
     'รายการที่เข้าเกณฑ์ / เหตุผล': r.items,
     'icode ที่เข้าเกณฑ์': r.item_codes,
     'ขาดรายการจำเป็น': r.missing_required,
-    'ขาดเมื่อเทียบเคสที่ได้รับเงิน': r.missing_common,
     'ตั้งเบิก (กองทุน)': r.his_fund_amount,
     'ได้รับ (กองทุน)': r.stm_fund_amount,
     'REP No.': r.rep_no,
@@ -113,7 +165,7 @@ function toSheetRows(rows) {
 
 const COL_WIDTHS = {
   'ประเด็นที่ควรตรวจ': 36, 'ชื่อ-สกุล': 24, 'สิทธิ': 22, 'รายการที่เข้าเกณฑ์ / เหตุผล': 36,
-  'ขาดรายการจำเป็น': 28, 'ขาดเมื่อเทียบเคสที่ได้รับเงิน': 30, 'ผลการแก้ไข / หมายเหตุ': 30, 'เลขบัตรประชาชน': 16,
+  'ขาดรายการจำเป็น': 28, 'ผลการแก้ไข / หมายเหตุ': 30,
 };
 
 function dataSheet(rows) {
@@ -136,6 +188,7 @@ export async function buildReport(opts, user) {
   const type = REPORT_TYPES[opts.type];
   return withFundTable({ ...opts, fundCode: null }, async (c) => {
     const rows = await queryReport(c, opts);
+    const sheetRows = await expandRows(c, rows);
     const { rows: funds } = await c.query(
       `SELECT code, name FROM funds WHERE is_active AND ($1::text[] IS NULL OR code = ANY($1::text[]))
        ORDER BY sort_order, code`, [opts.fundCodes?.length ? opts.fundCodes : null],
@@ -168,12 +221,12 @@ export async function buildReport(opts, user) {
 
     if (opts.split) {
       funds.forEach((f) => {
-        const fr = rows.filter((r) => r.fund_code === f.code);
+        const fr = sheetRows.filter((r) => r.fund_code === f.code);
         if (fr.length) XLSX.utils.book_append_sheet(wb, dataSheet(fr), f.code.slice(0, 31));
       });
       if (!rows.length) XLSX.utils.book_append_sheet(wb, dataSheet([]), 'ข้อมูล');
     } else {
-      XLSX.utils.book_append_sheet(wb, dataSheet(rows), 'ข้อมูล');
+      XLSX.utils.book_append_sheet(wb, dataSheet(sheetRows), 'ข้อมูล');
     }
     return { buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }), count: rows.length, title: type.title };
   });

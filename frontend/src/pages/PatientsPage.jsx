@@ -331,7 +331,7 @@ export default function PatientsPage() {
     ]),
     { value: NO_FUND, label: 'ไม่เข้าเกณฑ์กองทุนใด' },
   ];
-  const filtered = point.length || fund.length || step || problem || search || drop;
+  const filtered = !!(point.length || fund.length || step || problem || search || drop);
   const stepLabel = STEPS.find((s) => s.n === step)?.label;
   const steps = isReg ? [REG_STEP, ...STEPS] : STEPS;
 

@@ -111,7 +111,8 @@ export function fundCte() {
     SELECT i.vn, fi.fund_code,
            SUM(i.sum_price) AS his_fund_amount,
            string_agg(DISTINCT COALESCE(fi.item_name, i.icode), ', ') AS items,
-           array_agg(DISTINCT i.icode::text) AS icodes
+           array_agg(DISTINCT i.icode::text) AS icodes,
+           NULL::int[] AS act_ids
     FROM his_opd_items i
     JOIN his_opd_visits v ON v.vn = i.vn
     JOIN fund_items fi ON fi.icode = i.icode
@@ -130,7 +131,8 @@ export function fundCte() {
               AND i.icode IN (SELECT ai.icode FROM fund_activity_items ai WHERE ai.activity_id = ANY (fact2.acts))),
            fact2.names,
            COALESCE((SELECT array_agg(DISTINCT i.icode::text) FROM his_opd_items i WHERE i.vn = fact2.vn
-              AND i.icode IN (SELECT ai.icode FROM fund_activity_items ai WHERE ai.activity_id = ANY (fact2.acts))), ARRAY[]::text[])
+              AND i.icode IN (SELECT ai.icode FROM fund_activity_items ai WHERE ai.activity_id = ANY (fact2.acts))), ARRAY[]::text[]),
+           fact2.acts
     FROM fact2
     UNION ALL
     SELECT v.vn, f.code, v.uc_money,
@@ -139,7 +141,8 @@ export function fundCte() {
                        ELSE (SELECT string_agg(d.icd10, ', ' ORDER BY d.diagtype, d.icd10)
                                FROM his_opd_dx d WHERE d.vn = v.vn AND ${icdMatch('d.icd10')}) END, '')
                 ELSE 'ทุก visit ของสิทธิที่ตั้งค่า' END,
-           ARRAY[]::text[]
+           ARRAY[]::text[],
+           NULL::int[]
     FROM his_opd_visits v
     JOIN funds f ON f.is_active AND NOT f.track_only AND f.match_mode IN ('rights', 'icd')
     WHERE v.vstdate BETWEEN $1 AND $2
@@ -151,7 +154,7 @@ export function fundCte() {
       AND ($5::text IS NULL OR f.code = $5)
   ),
   elig AS (
-    SELECT fv.fund_code, fv.items, array_to_string(fv.icodes, ', ') AS item_codes,
+    SELECT fv.fund_code, fv.items, array_to_string(fv.icodes, ', ') AS item_codes, fv.act_ids,
            (SELECT string_agg(COALESCE(rq.item_name, rq.icode), ', ' ORDER BY rq.item_name)
               FROM fund_items rq
              WHERE rq.fund_code = fv.fund_code AND rq.required AND NOT (rq.icode = ANY (fv.icodes))
@@ -182,6 +185,7 @@ export function fundCte() {
              ELSE 'ไม่มีรายการที่ตั้งค่าไว้'
            END AS items,
            NULL::text AS item_codes,
+           NULL::int[] AS act_ids,
            NULL::text AS missing_required,
            NULL::numeric AS his_fund_amount,
            r.vn, COALESCE(r.hn, r.nhso_hn) AS hn, COALESCE(r.cid, r.pid) AS cid, r.patient_name, r.sdate,

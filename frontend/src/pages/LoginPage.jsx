@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
+import { ThemeToggle } from '../context/ThemeContext.jsx';
 import { errorMessage } from '../api/client.js';
 import { STATUS_META } from '../utils/format.js';
 
@@ -46,6 +47,7 @@ export default function LoginPage() {
       </section>
 
       <section className="login-form">
+        <div className="login-theme"><ThemeToggle className="btn btn-sm btn-outline-secondary" /></div>
         <form onSubmit={submit} noValidate>
           <h1 className="h4 fw-semibold mb-1">เข้าสู่ระบบ</h1>
           <p className="muted mb-4">ใช้บัญชีที่ได้รับจากผู้ดูแลระบบ</p>

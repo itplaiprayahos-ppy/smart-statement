@@ -3,3 +3,7 @@ frontend/dist/
 .env
 *.log
 .DS_Store
+
+# Claude Code (ส่วนตัวของเครื่อง)
+.claude/settings.local.json
+.claude/worktrees/

@@ -1,6 +1,7 @@
 import Swal from 'sweetalert2';
 import { errorMessage } from '../api/client.js';
 
+// ธีมของกล่องข้อความอ่านจาก <html data-bs-theme> ตอนเปิดกล่อง (พื้นหลัง/ตัวอักษรกำหนดใน app.css)
 const base = {
   confirmButtonText: 'ตกลง',
   cancelButtonText: 'ยกเลิก',
