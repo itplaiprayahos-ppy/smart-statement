@@ -22,6 +22,7 @@ import registryRoutes from './routes/registry.routes.js';
 import statusRoutes from './routes/status.routes.js';
 import pointRoutes from './routes/points.routes.js';
 import patientRoutes from './routes/patients.routes.js';
+import nhsoRoutes from './routes/nhso.routes.js';
 
 const app = express();
 
@@ -56,7 +57,11 @@ app.use('/api/registry', registryRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/status', statusRoutes);
 app.use('/api/points', pointRoutes);
+app.use('/api/nhso', nhsoRoutes);
 app.use('/api', notFound);
+
+// เบราว์เซอร์ขอ /favicon.ico เองโดยอัตโนมัติ ส่งต่อไปไอคอน SVG ของระบบ (ไม่ต้องผ่านการเสิร์ฟหน้าเว็บ)
+app.get('/favicon.ico', (_req, res) => res.redirect(302, '/favicon.svg'));
 
 // production: ให้ Express เสิร์ฟหน้าเว็บที่ build แล้ว (frontend/dist)
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../frontend/dist');

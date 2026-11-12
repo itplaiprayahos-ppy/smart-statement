@@ -352,6 +352,16 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
     fundColumns[f.code] = { matched: matched.map((c) => c.label), missing };
   }
 
+  // กองทุนที่ใช้คอลัมน์ยอดร่วมกับกองทุนอื่น: นับยอดเฉพาะแถวที่คอลัมน์ "กองทุนย่อย" ตรงกับค่าที่ตั้งไว้
+  const subCol = findFundColumns(columns, 'กองทุนย่อย')[0];
+  const fundSub = {};
+  if (subCol) {
+    for (const f of funds) {
+      const keys = (f.rep_subfunds || []).map((k) => String(k).trim().toUpperCase()).filter(Boolean);
+      if (keys.length && fundCols[f.code]) fundSub[f.code] = keys;
+    }
+  }
+
   const stmInfo = isStm ? statementDocOf(rows, headerIdx, fileName) : null;
   const stmDoc = isStm ? stmInfo.doc : findStmDoc(rows, headerIdx, fileName);
   const stmPeriod = isStm ? stmInfo.date : stmPeriodOf(stmDoc);
@@ -369,6 +379,7 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
       ...Object.fromEntries(Object.entries(moneyCols).map(([f, cs]) => [f, cs.map(label).join(' + ')])),
     },
     fundColumns,
+    subfundColumn: subCol?.label ?? null,
     missingRequired,
     records: [],
     errors: [],
@@ -455,7 +466,9 @@ export function parseExcel(buffer, profile, funds = [], fileName = '') {
     if (isStm && !tranId) problems.push('ไม่มี TRAN_ID (ใช้เชื่อมกับ REP)');
 
     const fundAmounts = {};
+    const subValue = subCol ? String(text(row[subCol.index]) ?? '').toUpperCase() : '';
     for (const [code, idxs] of Object.entries(fundCols)) {
+      if (fundSub[code] && !fundSub[code].some((k) => subValue.includes(k))) continue; // ยอดของกองทุนย่อยอื่น
       let sum = null;
       for (const c of idxs) {
         const m = parseMoney(row[c]);

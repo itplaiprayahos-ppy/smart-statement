@@ -15,7 +15,7 @@ const MATCH_MODES = [
 ];
 
 const blankFund = () => ({
-  originalCode: null, code: '', name: '', columnsText: '', sort_order: 0, is_active: true, items: [], activities: [], pttypes: [],
+  originalCode: null, code: '', name: '', columnsText: '', subfundsText: '', sort_order: 0, is_active: true, items: [], activities: [], pttypes: [],
   hipdata_codes: ['UCS'], target_send: 95, target_success: 90, target_complete: 95, track_only: false, stm_required: false,
   match_mode: 'items', icd10Text: '', icd10_scope: 'any',
 });
@@ -192,7 +192,7 @@ export default function FundSettingsPage() {
         : null);
       setForm({
         originalCode: data.code, code: data.code, name: data.name, sort_order: data.sort_order,
-        is_active: data.is_active, columnsText: (data.stm_columns || []).join('\n'), items: data.items,
+        is_active: data.is_active, columnsText: (data.stm_columns || []).join('\n'), subfundsText: (data.rep_subfunds || []).join(', '), items: data.items,
         activities: (data.activities || []).map((a) => ({
           name: a.name, items: a.items || [], items_mode: a.items_mode || 'any',
           icd10Text: (a.icd10_codes || []).join(', '), icd10_scope: a.icd10_scope || 'any', is_active: a.is_active !== false,
@@ -250,6 +250,7 @@ export default function FundSettingsPage() {
     const body = {
       code: form.code, name: form.name, sort_order: Number(form.sort_order) || 0, is_active: form.is_active,
       stm_columns: form.columnsText.split('\n').map((s) => s.trim()).filter(Boolean),
+      rep_subfunds: form.subfundsText.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
       items: form.items,
       activities: form.match_mode === 'items' ? form.activities.map((a) => ({
         name: a.name, items: a.items, items_mode: a.items_mode, icd10_codes: parseIcd(a.icd10Text),
@@ -363,6 +364,15 @@ export default function FundSettingsPage() {
                       ใส่ชื่อคอลัมน์ตามหัวตารางของไฟล์ REP (ชีต Detail) บรรทัดละ 1 ชื่อ หลายบรรทัดระบบรวมยอดให้
                       เขียนแบบ “กลุ่ม / คอลัมน์ย่อย” เช่น ค่าใช้จ่ายสูง (HC) / OPHC ถ้าใส่เฉพาะหัวกลุ่ม ระบบรวมทุกคอลัมน์ย่อยใต้กลุ่มนั้น
                       คัดลอกชื่อที่ถูกต้องได้จาก “หัวคอลัมน์ทั้งหมดในไฟล์” ในหน้าตรวจไฟล์ นำเข้าไฟล์ใหม่ทุกครั้งหลังแก้
+                    </div>
+                  </div>
+                  <div className="col-12">
+                    <label className="form-label" htmlFor="fs-sub">กองทุนย่อยใน REP (ใช้เมื่อหลายกองทุนใช้คอลัมน์ยอดเดียวกัน)</label>
+                    <input id="fs-sub" className="form-control" value={form.subfundsText}
+                      onChange={(e) => update({ subfundsText: e.target.value })} placeholder="เช่น TELEMED (ว่างไว้ถ้ากองทุนนี้ไม่ได้ใช้คอลัมน์ร่วมกับกองทุนอื่น)" />
+                    <div className="form-text">
+                      ใส่ค่าที่ปรากฏในคอลัมน์ “กองทุนย่อย” ของไฟล์ REP เช่น TELEMED หรือ ACUPUNCTURE (คั่นหลายค่าด้วยจุลภาค)
+                      ถ้าตั้งไว้ ระบบจะนับยอดให้กองทุนนี้เฉพาะแถวที่กองทุนย่อยตรงกัน ต้องนำเข้าไฟล์ REP ใหม่หลังตั้งค่า
                     </div>
                   </div>
                   {!form.track_only && (

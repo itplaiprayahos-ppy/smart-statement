@@ -81,6 +81,8 @@ function readFund(body = {}) {
   if (!name) throw new HttpError(400, 'กรุณาใส่ชื่อกองทุน');
   const cols = (Array.isArray(body.stm_columns) ? body.stm_columns : [])
     .map((c) => String(c).trim()).filter(Boolean);
+  const subfunds = [...new Set((Array.isArray(body.rep_subfunds) ? body.rep_subfunds : [])
+    .map((c) => String(c).trim().slice(0, 100)).filter(Boolean))];
   const items = (Array.isArray(body.items) ? body.items : []).map((it) => ({
     icode: String(it.icode || '').trim(),
     item_name: it.item_name ? String(it.item_name).slice(0, 300) : null,
@@ -127,7 +129,7 @@ function readFund(body = {}) {
   if (new Set(activities.map((a) => a.name)).size !== activities.length) throw new HttpError(400, 'ชื่อกิจกรรมย่อยซ้ำกัน');
   return {
     activities,
-    code, name, cols, items, pttypes, hipdataCodes, targets, trackOnly: body.track_only === true,
+    code, name, cols, subfunds, items, pttypes, hipdataCodes, targets, trackOnly: body.track_only === true,
     stmRequired: body.stm_required === true,
     matchMode: ['rights', 'icd'].includes(body.match_mode) ? body.match_mode : 'items',
     // แบบสิทธิการรักษาไม่ใช้รหัสโรค
@@ -146,21 +148,21 @@ async function saveFund(req, res, originalCode) {
       const { rowCount } = await client.query(
         `UPDATE funds SET code = $1, name = $2, stm_columns = $3, sort_order = $4, is_active = $5, pttypes = $7,
            target_send = $8, target_success = $9, target_complete = $10, hipdata_codes = $11, track_only = $12,
-           match_mode = $13, icd10_codes = $14, icd10_scope = $15, stm_required = $16, updated_at = now()
+           match_mode = $13, icd10_codes = $14, icd10_scope = $15, stm_required = $16, rep_subfunds = $17, updated_at = now()
          WHERE code = $6`,
         [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, originalCode, JSON.stringify(f.pttypes),
           f.targets.send, f.targets.success, f.targets.complete, JSON.stringify(f.hipdataCodes), f.trackOnly, f.matchMode,
-          JSON.stringify(f.icd10Codes), f.icd10Scope, f.stmRequired],
+          JSON.stringify(f.icd10Codes), f.icd10Scope, f.stmRequired, JSON.stringify(f.subfunds)],
       );
       if (!rowCount) throw new HttpError(404, 'ไม่พบกองทุน');
     } else {
       await client.query(
         `INSERT INTO funds (code, name, stm_columns, sort_order, is_active, pttypes, target_send, target_success,
-           target_complete, hipdata_codes, track_only, match_mode, icd10_codes, icd10_scope, stm_required)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+           target_complete, hipdata_codes, track_only, match_mode, icd10_codes, icd10_scope, stm_required, rep_subfunds)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
         [f.code, f.name, JSON.stringify(f.cols), f.sort_order, f.is_active, JSON.stringify(f.pttypes),
           f.targets.send, f.targets.success, f.targets.complete, JSON.stringify(f.hipdataCodes), f.trackOnly, f.matchMode,
-          JSON.stringify(f.icd10Codes), f.icd10Scope, f.stmRequired],
+          JSON.stringify(f.icd10Codes), f.icd10Scope, f.stmRequired, JSON.stringify(f.subfunds)],
       );
     }
     // แทนที่รายการ แต่คงเวลาเพิ่มเดิมไว้ เพื่อให้รู้ว่ารายการไหนเพิ่มใหม่หลังดึง HOSxP

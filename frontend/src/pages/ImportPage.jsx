@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../api/client.js';
 import SortTh from '../components/SortTh.jsx';
+import EclaimSync from '../components/EclaimSync.jsx';
 import { notifyDataChanged } from '../utils/dataEvents.js';
 import { useSort } from '../hooks/useSort.js';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -62,6 +63,12 @@ export default function ImportPage() {
     api.get('/imports', { params: { claimType: 'OPD' } }).then((r) => setHistory(r.data)).catch(showError);
     api.get('/imports/legacy-stm').then((r) => setLegacy(r.data)).catch(() => {});
   }, []);
+
+  /** นำเข้าจาก e-Claim เสร็จ: โหลดประวัติใหม่และแจ้งทุกส่วนว่าข้อมูลเปลี่ยน */
+  const afterEclaimImport = useCallback(() => {
+    loadHistory();
+    notifyDataChanged();
+  }, [loadHistory]);
 
   const removeLegacy = async () => {
     const ok = await confirmAction({
@@ -237,6 +244,8 @@ export default function ImportPage() {
           )}
         </div>
       )}
+
+      {!isStm && <EclaimSync onImported={afterEclaimImport} />}
 
       <div className="panel">
         <div className="row g-3 align-items-end">

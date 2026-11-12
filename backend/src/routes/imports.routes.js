@@ -24,7 +24,7 @@ const fileNameOf = (file) => Buffer.from(file.originalname, 'latin1').toString('
 async function loadFunds(profile) {
   // Statement ไม่ได้แยกยอดรายกองทุน (ยอดโอนทั้งรายการ)
   if (profile?.file_type === 'STM') return [];
-  const { rows } = await db.query('SELECT code, stm_columns FROM funds WHERE is_active ORDER BY sort_order, code');
+  const { rows } = await db.query('SELECT code, stm_columns, rep_subfunds FROM funds WHERE is_active ORDER BY sort_order, code');
   return rows;
 }
 
